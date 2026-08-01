@@ -21,8 +21,8 @@ struct ContentView: View {
             compactToolbar
 
             HStack(spacing: 0) {
-                // 左侧 sidebar（条件渲染：未展开时不占宽度）
-                if sidebarState.isVisible, let _ = sidebarState.activeMode {
+                // 左侧 sidebar（activeMode 非 nil 时显示）
+                if sidebarState.isVisible {
                     SidebarView(
                         treeManager: treeManager,
                         activeMode: $sidebarState.activeMode,
@@ -45,7 +45,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.easeInOut(duration: 0.22), value: sidebarState.isVisible)
+            .animation(.easeInOut(duration: 0.22), value: sidebarState.activeMode)
 
             StatusBar(errors: document.errors)
         }

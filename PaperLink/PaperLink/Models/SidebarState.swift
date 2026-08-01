@@ -3,7 +3,17 @@
 //  PaperLink
 //
 //  Phase 1 Sprint 3+: 全局 sidebar 状态。
-//  让 toolbar 上的按钮能控制 sidebar 显示/模式选择。
+//  toolbar 上的 Picker(.segmented) 控制 sidebar 显示/模式。
+//
+//  状态机（activeMode 二元状态）：
+//    .project = (1, 0) 项目模式，sidebar 显示
+//    .figures = (0, 1) 图片模式，sidebar 显示
+//    nil      = (0, 0) sidebar 收起
+//
+//  规则：
+//    - 点击当前激活模式 → 收起（nil）
+//    - 点击另一个模式   → 切换到该模式
+//    - 收起后点击任意模式 → 直接展开该模式
 //
 
 import SwiftUI
@@ -13,26 +23,24 @@ import Combine
 final class SidebarState: ObservableObject {
     static let shared = SidebarState()
 
-    @Published var isVisible: Bool = true
-    /// 当前展开的 mode（nil = 不展开）
+    /// 当前 sidebar 模式。nil = sidebar 收起
     @Published var activeMode: SidebarView.Mode? = .project
+
+    /// sidebar 是否可见（= activeMode != nil）
+    var isVisible: Bool { activeMode != nil }
 
     private init() {}
 
-    func toggleVisibility() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isVisible.toggle()
-        }
-    }
-
-    func toggleMode(_ mode: SidebarView.Mode) {
-        withAnimation(.easeInOut(duration: 0.2)) {
+    /// 点击 Picker 的某个 mode：
+    ///   - 同一 mode 再点 → 收起（nil）
+    ///   - 不同 mode → 切换
+    func select(_ mode: SidebarView.Mode) {
+        withAnimation(.easeInOut(duration: 0.22)) {
             if activeMode == mode {
-                // 再点同一个 → 整个 sidebar 收起
-                isVisible = false
+                // (1,0) → (0,0) 或 (0,1) → (0,0)
+                activeMode = nil
             } else {
-                // 切到另一个 mode
-                isVisible = true
+                // (0,0) → (1,0) 或 (0,1) → (1,0) 或 (1,0) → (0,1)
                 activeMode = mode
             }
         }

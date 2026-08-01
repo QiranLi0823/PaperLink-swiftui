@@ -21,12 +21,7 @@ struct PaperLinkApp: App {
                 .toolbar {
                     // sidebar 模式按钮：原生 Picker + segmented 样式（macOS 26 Liquid Glass）
                     ToolbarItemGroup(placement: .navigation) {
-                        SidebarModeBar(
-                            activeMode: $sidebarState.activeMode,
-                            onSameMode: {
-                                sidebarState.toggleVisibility()
-                            }
-                        )
+                        SidebarModeBar(activeMode: $sidebarState.activeMode)
                     }
                 }
         }
@@ -67,39 +62,54 @@ extension FocusedValues {
     @Entry var sidebarState: SidebarState? = nil
 }
 
-/// macOS 风 sidebar 模式 bar：原生 Picker + segmented 样式
-/// macOS 26 自动用 Liquid Glass 滑动效果
+/// macOS 26 sidebar 模式按钮组：去外框、悬浮式
+///
+/// 视觉语言：
+///   - 完全无外框 / 无背景 / 无边框
+///   - 每个按钮：未选中 = 次要色 / 选中 = accent color 透明度椭圆底
+///   - hover = 极轻的灰底
+///   - 整体融入 toolbar 背景
+///
+/// 点击行为：
+///   - 当前已激活 → 收起（activeMode = nil）
+///   - 当前别的模式 → 切换
+///   - 当前收起 → 展开
 struct SidebarModeBar: View {
     @Binding var activeMode: SidebarView.Mode?
-    let onSameMode: () -> Void    // 再点同一个 → 收起 sidebar
-
-    @State private var lastSelection: SidebarView.Mode?
 
     var body: some View {
-        Picker(
-            "Sidebar Mode",
-            selection: Binding(
-                get: { activeMode ?? .project },
-                set: { newMode in
-                    // 检测"再点同一个"
-                    if newMode == lastSelection && activeMode == newMode {
-                        onSameMode()
-                        return
-                    }
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        activeMode = newMode
-                    }
-                    lastSelection = newMode
-                }
-            )
-        ) {
-            ForEach(SidebarView.Mode.allCases) { mode in
-                Image(systemName: mode.icon).tag(mode)
-            }
+        HStack(spacing: 0) {
+            segment(.project)
+            segment(.figures)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 90, height: 22)
+    }
+
+    @ViewBuilder
+    private func segment(_ mode: SidebarView.Mode) -> some View {
+        let isActive = activeMode == mode
+
+        Button {
+            if activeMode == mode {
+                activeMode = nil
+            } else {
+                activeMode = mode
+            }
+        } label: {
+            ZStack {
+                // 选中态蓝色底（正圆 22pt，独立于按钮 hit area）
+                Circle()
+                    .fill(isActive ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .frame(width: 22, height: 22)
+                // icon（按钮 hit area 是 32×22 椭圆）
+                Image(systemName: mode.icon)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+            }
+            .frame(width: 32, height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(mode == .project ? "项目文件树" : "图片列表")
     }
 }
 

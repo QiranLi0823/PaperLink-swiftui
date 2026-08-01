@@ -53,7 +53,7 @@ struct LineNumberedEditor: NSViewRepresentable {
             gutter.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             gutter.topAnchor.constraint(equalTo: container.topAnchor),
             gutter.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            gutter.widthAnchor.constraint(equalToConstant: 48),
+            gutter.widthAnchor.constraint(equalToConstant: 32),
 
             scrollView.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -193,46 +193,55 @@ class GutterView: NSView {
 
             var actualGlyphRange = NSRange()
             let lineGlyphRange = layoutManager.glyphRange(forCharacterRange: lineRange, actualCharacterRange: &actualGlyphRange)
-            let lineRect = layoutManager.boundingRect(forGlyphRange: lineGlyphRange, in: textContainer)
 
-            // lineRect 在 textContainer 坐标系（也是 textView 坐标系，左上原点）
-            let lineTopInTextView = lineRect.origin.y + yOrigin
-            let lineBottomInTextView = lineTopInTextView + lineRect.height
+            // 遍历这个字符 line 内的所有 visual line（软换行）
+            var glyphIndex = lineGlyphRange.location
+            while glyphIndex < NSMaxRange(lineGlyphRange) {
+                var visualLineGlyphRange = NSRange()
+                let visualLineRect = layoutManager.lineFragmentRect(
+                    forGlyphAt: glyphIndex,
+                    effectiveRange: &visualLineGlyphRange,
+                    withoutAdditionalLayout: true
+                )
+                let lineTopInTextView = visualLineRect.origin.y + yOrigin
+                let gutterY = lineTopInTextView - scrollOffsetY
+                let drawHeight = visualLineRect.height
 
-            // gutter 也是左上原点（NSView 默认），所以直接平移
-            // gutter y = 文本 y - 滚动偏移
-            let gutterY = lineTopInTextView - scrollOffsetY
-            let drawHeight = lineRect.height
+                // 可见性判断
+                guard gutterY + drawHeight >= dirtyRect.minY,
+                      gutterY <= dirtyRect.maxY else {
+                    glyphIndex = NSMaxRange(visualLineGlyphRange)
+                    continue
+                }
 
-            // 可见性判断
-            guard gutterY + drawHeight >= dirtyRect.minY,
-                  gutterY <= dirtyRect.maxY else {
-                charIndex = lineRange.location + lineRange.length
-                line += 1
-                if line > 10000 { break }
-                continue
+                // 错误行红底（每个 visual line 都画，让长段软换行也能视觉标记）
+                if errorLines.contains(line) {
+                    NSColor.systemRed.withAlphaComponent(0.10).setFill()
+                    NSRect(x: 0, y: gutterY, width: bounds.width, height: drawHeight).fill()
+                    NSColor.systemRed.setFill()
+                    NSRect(x: 0, y: gutterY, width: 2, height: drawHeight).fill()
+                }
+
+                // 行号：只在字符 line 的第一个 visual line 画
+                let isFirstVisualLine = (glyphIndex == lineGlyphRange.location)
+                if isFirstVisualLine {
+                    let lineNumString = "\(line)" as NSString
+                    let attrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+                        .foregroundColor: errorLines.contains(line)
+                            ? NSColor.systemRed
+                            : NSColor.tertiaryLabelColor
+                    ]
+                    let textSize = lineNumString.size(withAttributes: attrs)
+                    let drawX = bounds.width - textSize.width - 6
+                    lineNumString.draw(
+                        at: NSPoint(x: drawX, y: gutterY + 1),
+                        withAttributes: attrs
+                    )
+                }
+
+                glyphIndex = NSMaxRange(visualLineGlyphRange)
             }
-
-            // 错误行红底（柔和）
-            if errorLines.contains(line) {
-                NSColor.systemRed.withAlphaComponent(0.10).setFill()
-                NSRect(x: 0, y: gutterY, width: bounds.width, height: drawHeight).fill()
-                // 左侧 2pt 红条
-                NSColor.systemRed.setFill()
-                NSRect(x: 0, y: gutterY, width: 2, height: drawHeight).fill()
-            }
-
-            // 行号
-            let lineNumString = "\(line)" as NSString
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
-                .foregroundColor: errorLines.contains(line)
-                    ? NSColor.systemRed
-                    : NSColor.tertiaryLabelColor
-            ]
-            let textSize = lineNumString.size(withAttributes: attrs)
-            let drawX = bounds.width - textSize.width - 6
-            lineNumString.draw(at: NSPoint(x: drawX, y: gutterY + (drawHeight - textSize.height) / 2), withAttributes: attrs)
 
             charIndex = lineRange.location + lineRange.length
             line += 1

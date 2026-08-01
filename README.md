@@ -12,8 +12,20 @@ macOS SwiftUI 论文编辑器。
 
 - **三栏**：sidebar（220pt，可隐藏）+ editor（minWidth 380）+ preview（minWidth 380）
 - **editor / preview 1:1**：HSplitView 对称 minWidth，初始等宽
-- **sidebar 切换**：标题栏 segmented Picker（📁 项目 / 🖼 图片），再点同一项收起整个 sidebar
+- **sidebar 切换**：标题栏两个 icon 按钮（📁 项目 / 🖼 图片），再点同一项收起整个 sidebar
 - **窗口标题**：固定显示 "PaperLink"（不再显示当前文件名）
+
+## Sidebar 状态机
+
+`SidebarState.activeMode: Mode?` 单一状态，三态切换：
+
+| 当前状态 | 点击 📁 | 点击 🖼 |
+|---|---|---|
+| `.project` (1, 0) | 收起 (`nil`) | 切到 `.figures` |
+| `.figures` (0, 1) | 切到 `.project` | 收起 (`nil`) |
+| `nil` (0, 0) | 展开 `.project` | 展开 `.figures` |
+
+收起时两个按钮都显示次要色（无选中态），符合 (0, 0) 视觉。
 
 ## 支持的 PaperML 语法
 
@@ -82,8 +94,9 @@ macOS SwiftUI 论文编辑器。
 
 ## 编辑器功能
 
-- **行号 gutter**：左侧 48pt 灰色条带，行号右对齐，monospaced digit font
+- **行号 gutter**：左侧 32pt 灰色条带，行号右对齐，monospaced digit font
 - **错误行高亮**：`parseWithErrors` 报告的 ParseError 行号在 gutter 内画红色 10% 背景 + 左侧 2pt 红条，行号变红
+- **行号定位**：按 visual line 渲染——一段被软换行拆成 N 行的文字，行号只画在第一行顶部，后续视觉行只画错误底色（不重复行号）
 - **持久化**：上次打开的文件路径存到 `UserDefaults[PaperLink.lastOpenedFilePath]`
 - **重命名**：⌘R 触发同目录下重命名（移动文件 + 更新持久化路径）
 - **现代 CSS**：HTMLRenderer 使用 CSS variables，自动适配 light/dark mode；body `max-width: 100%` + `overflow-x: hidden` 防止 WKWebView 在窄容器内横向溢出

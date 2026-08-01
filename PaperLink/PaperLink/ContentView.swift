@@ -262,9 +262,12 @@ struct HTMLPreview: NSViewRepresentable {
         let htmlChanged = (context.coordinator.lastKey != key)
         if htmlChanged {
             context.coordinator.lastKey = key
+            // Sprint 9.17：rootURL 切换时先扫一下孤儿（覆盖应用崩溃留下的垃圾）
+            PreviewFileCleaner.shared.sweepOrphans(in: rootURL)
             let previewFile = rootURL.appendingPathComponent(".paperlink-preview-\(html.hashValue).html")
             do {
                 try html.write(to: previewFile, atomically: true, encoding: .utf8)
+                PreviewFileCleaner.shared.registerWritten(previewFile)
                 webView.loadFileURL(previewFile, allowingReadAccessTo: rootURL)
             } catch {
                 print("[HTMLPreview] write failed: \(error) -> fallback loadHTMLString")

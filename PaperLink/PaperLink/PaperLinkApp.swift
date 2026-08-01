@@ -15,6 +15,20 @@ struct PaperLinkApp: App {
     @State private var closeGuard: WindowCloseGuard?
     @State private var recentFiles: [(url: URL, path: String)] = []
 
+    init() {
+        // Sprint 9.17：启动时扫 Bundle.resources + Open Recent 目录，删 .paperlink-preview-*.html 孤儿
+        PreviewFileCleaner.shared.cleanupOnStartup()
+
+        // 应用退出时（⌘Q）删本次运行产生的全部 preview 文件
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            PreviewFileCleaner.shared.cleanupAllWritten()
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

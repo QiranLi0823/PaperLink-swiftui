@@ -64,10 +64,21 @@ struct LineNumberedEditor: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.gutter = gutter
 
+        // Sprint 5：初始涂色
+        Coordinator.applySyntaxHighlighting(to: textView)
+
         // 关键：让 gutter 监听 textView 的内容变化来刷新
         NotificationCenter.default.addObserver(
             context.coordinator,
             selector: #selector(Coordinator.refreshGutter),
+            name: NSText.didChangeNotification,
+            object: textView
+        )
+
+        // Sprint 5：监听 textView 内容变化，每次用户输入都重涂 @identifier
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.applyHighlight),
             name: NSText.didChangeNotification,
             object: textView
         )
@@ -95,13 +106,40 @@ struct LineNumberedEditor: NSViewRepresentable {
               let gutter = context.coordinator.gutter else { return }
 
         if textView.string != text {
+            // 外部 source 变化 → 整体替换 + 重涂语法高亮
             textView.string = text
+            applySyntaxHighlighting(to: textView)
         }
 
         gutter.errorLines = Set(errors.map { $0.line })
         gutter.textView = textView
         gutter.scrollView = scrollView
         gutter.setNeedsDisplay(gutter.bounds)
+    }
+
+    /// 把所有 `@identifier` 涂成 accentColor（蓝色）。
+    /// 用户敲击时 textView 自动处理单字符着色（不影响此函数），本函数只在外部 sync 时整体涂一遍。
+    private func applySyntaxHighlighting(to textView: NSTextView) {
+        guard let storage = textView.textStorage else { return }
+        let fullRange = NSRange(location: 0, length: storage.length)
+        guard fullRange.length > 0 else { return }
+
+        // 先清掉旧的 .foregroundColor（让默认色回来）
+        storage.beginEditing()
+        storage.removeAttribute(.foregroundColor, range: fullRange)
+
+        // 涂 @identifier
+        let pattern = #"@[A-Za-z_][A-Za-z0-9_]*"#
+        var matchCount = 0
+        if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+            regex.enumerateMatches(in: storage.string, options: [], range: fullRange) { match, _, _ in
+                guard let r = match?.range else { return }
+                storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: r)
+                matchCount += 1
+            }
+        }
+        storage.endEditing()
+        print("[highlight] applied \(matchCount) @identifier tokens")
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -130,6 +168,36 @@ struct LineNumberedEditor: NSViewRepresentable {
             g.textView = tv
             g.scrollView = tv.enclosingScrollView
             g.setNeedsDisplay(g.bounds)
+        }
+
+        /// Sprint 5：用户输入后立刻重涂 @identifier
+        @objc func applyHighlight() {
+            guard let tv = textView else { return }
+            Self.applySyntaxHighlighting(to: tv)
+        }
+
+        /// 把所有 `@identifier` 涂成 accentColor（蓝色），其余字符恢复默认 labelColor。
+        /// （用 removeAttribute 会让 NSTextView fallback 到 hardcoded .black，所以一定要重新设回 labelColor）
+        static func applySyntaxHighlighting(to textView: NSTextView) {
+            guard let storage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: storage.length)
+            guard fullRange.length > 0 else { return }
+
+            let defaultColor = NSColor.labelColor
+
+            storage.beginEditing()
+            // 1. 全文档设为默认 labelColor（dark mode 下是白，light mode 下是黑）
+            storage.addAttribute(.foregroundColor, value: defaultColor, range: fullRange)
+
+            // 2. 把 @identifier 覆盖成蓝色
+            let pattern = #"@[A-Za-z_][A-Za-z0-9_]*"#
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                regex.enumerateMatches(in: storage.string, options: [], range: fullRange) { match, _, _ in
+                    guard let r = match?.range else { return }
+                    storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: r)
+                }
+            }
+            storage.endEditing()
         }
     }
 }

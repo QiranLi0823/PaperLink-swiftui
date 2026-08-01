@@ -32,17 +32,9 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .leading)))
                 }
 
-                // 右侧：editor + preview 1:1
-                HSplitView {
-                    LineNumberedEditor(text: $document.source, errors: document.errors)
-                        .padding(8)
-                        .frame(minWidth: 380)
-
-                    HTMLPreview(html: document.html, fileURL: document.fileURL)
-                        .padding(8)
-                        .frame(minWidth: 380)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 右侧：editor + preview 1:1（可拖动 + 持久化比例）
+                SplitContainer(document: document)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(.easeInOut(duration: 0.22), value: sidebarState.activeMode)
@@ -101,23 +93,30 @@ struct ContentView: View {
 
 // MARK: - WKWebView 包装
 
-/// 策略：把 HTML 写到 rootURL **之内**的临时文件 + `loadFileURL` 加载。
+/// 策略：HTML 写到 `rootURL` 之内的临时文件（`.paperlink-preview-<hash>.html`），
+/// 然后用 `loadFileURL(allowingReadAccessTo: rootURL)` 加载。
 ///
-/// 为什么不用 `loadHTMLString`：
-///   - `loadHTMLString` 内部走 about:blank scheme，WKWebView 在 macOS 上从 about:blank
-///     加载 file:// 资源行为不一致
+/// 为什么 HTML 必须写在 `rootURL` 内：
+///   - WKWebView 在 macOS 上要求 `loadFileURL` 的 URL **必须**在 `allowingReadAccessTo` 之内
+///     （否则 sandbox 拒绝：`url is not inside resource directory url`）
+///   - 写在 `rootURL` 内 → 同一目录 → sandbox 放行 → 同时 `<img src="figures/x.png">` 也能直接解析
 ///
-/// 为什么 HTML 必须写在 rootURL 内：
-///   - WKWebView 解析 `<img src="figures/x.png">` 相对路径是基于 HTML 文件自身的位置
-///   - 如果 HTML 写在 `/tmp/paperlink-preview.html`，相对路径会解析到 `/tmp/figures/...`，图就找不到
-///   - 写在 rootURL 内（比如 `~/Documents/papers/.paperlink-preview.html`），
-///     相对路径自动解析到 `~/Documents/papers/figures/x.png`
+/// 为什么不在 `~/Library/Application Support/` 写：
+///   - 那就需要 `allowingReadAccessTo: appSupportDir + rootURL`（两个目录），
+///     macOS WKWebView 不支持 multi-root allowingReadAccessTo
+///
+/// Dev vs Release 写权限：
+///   - Dev（sandbox=NO）：`Resources/` 可写 → 直接写 → OK
+///   - Release（sandbox=YES）：`Resources/` 在 app bundle 里**只读** → 写失败 → fallback
+///     但 Release 也不会触发（Xcode source-synced Resources 不存在），
+///     用户文档目录是 sandbox 下的 user-selected，是可写的
+///
+/// HTML 临时文件名：`.paperlink-preview-<hash>.html`（隐藏文件，避免污染文件列表，
+/// hash 后缀保证不同内容不互相覆盖）。
 ///
 /// rootURL 决定图片所在的目录：
 ///   - fileURL != nil → rootURL = fileURL 所在目录（图片走同目录 figures/）
 ///   - fileURL == nil → rootURL = Bundle.main.resourceURL（demo 图走 bundle 内 figures/）
-///
-/// 临时文件名：`.paperlink-preview.html`（隐藏文件，避免污染文件列表）。
 struct HTMLPreview: NSViewRepresentable {
     let html: String
     let fileURL: URL?
@@ -133,19 +132,23 @@ struct HTMLPreview: NSViewRepresentable {
         } else {
             rootURL = Bundle.main.resourceURL ?? URL(fileURLWithPath: NSTemporaryDirectory())
         }
+        print("[HTMLPreview] rootURL=\(rootURL.path), html length=\(html.count)")
 
         // 幂等：html/rootURL 都没变就跳过
         let key = "\(html.hashValue)-\(rootURL.path)"
         guard context.coordinator.lastKey != key else { return }
         context.coordinator.lastKey = key
 
-        // 把 HTML 写到 rootURL 内
-        let previewFile = rootURL.appendingPathComponent(".paperlink-preview.html")
+        // 把 HTML 写到 rootURL 内：保证 WKWebView sandbox 允许 + 相对路径解析正确
+        let previewFile = rootURL.appendingPathComponent(".paperlink-preview-\(html.hashValue).html")
         do {
             try html.write(to: previewFile, atomically: true, encoding: .utf8)
             webView.loadFileURL(previewFile, allowingReadAccessTo: rootURL)
         } catch {
-            // 写失败 fallback 到 loadHTMLString
+            // rootURL 只读（Xcode bundle / 某些 sandbox 场景）→ fallback
+            // loadHTMLString + baseURL 在 macOS WKWebView 上不能读 file:// 资源，
+            // 但至少能让用户看到 HTML 骨架（图的 alt 文字、CSS 样式）。
+            print("[HTMLPreview] write failed: \(error) -> fallback loadHTMLString")
             webView.loadHTMLString(html, baseURL: rootURL)
         }
     }

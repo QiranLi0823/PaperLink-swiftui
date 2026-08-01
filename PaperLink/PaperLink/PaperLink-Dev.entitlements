@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Debug/Dev entitlements：故意为空（不启用 sandbox）。
+
+      为什么要单独一份：
+        - Release 用 PaperLink.entitlements，里面 <key>com.apple.security.app-sandbox</key><true/>
+        - 但只要 entitlements 文件里写了 sandbox=true，codesign 就强制启用 sandbox，
+          不论 Xcode build setting `ENABLE_APP_SANDBOX=NO`
+        - 启用 sandbox 后，app 只能读用户通过 NSOpenPanel 显式授权的文件
+        - Dev 阶段 demo.pml 旁边的 figures/ 不会被授权（除非再调一次 NSOpenPanel 选 figures/），
+          FileManager.contentsOfDirectory 立刻报 NSCocoaErrorDomain Code=257
+
+      调试期需求：
+        - 任意位置打开 .pml，立刻能读同目录的 figures/、resources/
+        - 不需要 security-scoped bookmark（FileManager 默认就能读）
+
+      Release 期间（用户拿到 .app）才启用 sandbox，靠 security-scoped bookmark 跨启动恢复。
+    -->
+</dict>
+</plist>

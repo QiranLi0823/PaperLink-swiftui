@@ -12,6 +12,7 @@ struct PaperLinkApp: App {
     @StateObject private var document = PaperDocument()
     @StateObject private var sidebarState = SidebarState.shared
     @State private var closeGuard: WindowCloseGuard?
+    @State private var recentFiles: [(url: URL, path: String)] = []
 
     var body: some Scene {
         WindowGroup {
@@ -30,15 +31,20 @@ struct PaperLinkApp: App {
                     if closeGuard == nil, let window = NSApp.windows.first(where: { $0.isVisible }) {
                         closeGuard = WindowCloseGuard(document: document, window: window)
                     }
+                    refreshRecent()
                 }
                 // Finder 双击 .pml 文件 / `open file.pml` 命令行 → 加载目标文件
                 .onOpenURL { url in
                     document.open(url: url)
                 }
+                // Open Recent 列表变化 → 刷新菜单
+                .onReceive(NotificationCenter.default.publisher(for: .paperLinkRecentChanged)) { _ in
+                    refreshRecent()
+                }
         }
         .windowToolbarStyle(.unified)
         .commands {
-            // File 菜单：替换默认的 New Item，加 Open / Save / Save As / Rename
+            // File 菜单：替换默认的 New Item，加 Open / Save / Save As / Rename / Open Recent
             CommandGroup(replacing: .newItem) {
                 Button("Open…") { openAction() }
                     .keyboardShortcut("o", modifiers: [.command])
@@ -50,8 +56,34 @@ struct PaperLinkApp: App {
                 Divider()
                 Button("Rename") { renameAction() }
                     .keyboardShortcut("r", modifiers: [.command])
+                Divider()
+                openRecentMenu
             }
         }
+    }
+
+    /// Open Recent 子菜单：动态列出最近 10 个 .pml 文件
+    @ViewBuilder
+    private var openRecentMenu: some View {
+        Menu("Open Recent") {
+            if recentFiles.isEmpty {
+                Text("No Recent Files")
+            } else {
+                ForEach(Array(recentFiles.enumerated()), id: \.offset) { _, item in
+                    Button(item.url.lastPathComponent) {
+                        document.open(url: item.url)
+                    }
+                }
+                Divider()
+                Button("Clear Menu") {
+                    PaperDocument.clearRecent()
+                }
+            }
+        }
+    }
+
+    private func refreshRecent() {
+        recentFiles = PaperDocument.recentFiles()
     }
 
     private func openAction() {

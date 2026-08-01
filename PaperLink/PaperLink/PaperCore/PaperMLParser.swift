@@ -15,6 +15,124 @@ import Foundation
 
 enum PaperMLParser {
 
+    /// 解析入口（Phase 1 Sprint 1：收集错误）
+    /// 不破坏现有 parse(_:) API；老调用方继续可用。
+    /// errors 是解析过程中识别的错误（@title 块没闭合、未识别的关键字等）
+    static func parseWithErrors(_ source: String) -> ParseResult {
+        let doc = parse(source)
+        var errors: [ParseError] = []
+
+        // 检查 1: @title 关键字出现但 parseTitle 失败
+        if source.contains("@title"), doc.metadata.title == nil {
+            if let titleStart = source.range(of: "@title") {
+                let offset = source.distance(from: source.startIndex, to: titleStart.lowerBound)
+                let pos = source.position(at: offset)
+                errors.append(ParseError(
+                    severity: .error,
+                    line: pos.line,
+                    column: pos.column,
+                    message: "@title 块未能正确闭合（缺少 `}` 或内部语法错）"
+                ))
+            }
+        }
+
+        // 检查 2: @abstract 关键字出现但 parseAbstract 失败
+        if source.contains("@abstract"), doc.metadata.abstract == nil {
+            if let absStart = source.range(of: "@abstract") {
+                let offset = source.distance(from: source.startIndex, to: absStart.lowerBound)
+                let pos = source.position(at: offset)
+                errors.append(ParseError(
+                    severity: .error,
+                    line: pos.line,
+                    column: pos.column,
+                    message: "@abstract 块未能正确闭合"
+                ))
+            }
+        }
+
+        // 检查 3: 顶层有 @author 但没在 @title 块内（孤立）
+        if let authorRange = source.range(of: "@author") {
+            let authorOffset = source.distance(from: source.startIndex, to: authorRange.lowerBound)
+            if let titleRange = source.range(of: "@title"),
+               titleRange.lowerBound < authorRange.lowerBound {
+                if let titleEnd = findMatchingBrace(in: Substring(source), from: titleRange.upperBound) {
+                    if titleEnd < authorRange.lowerBound {
+                        let pos = source.position(at: authorOffset)
+                        errors.append(ParseError(
+                            severity: .error,
+                            line: pos.line,
+                            column: pos.column,
+                            message: "@author 块应在 @title 块内嵌套，但检测到独立 @author"
+                        ))
+                    }
+                }
+            } else {
+                let pos = source.position(at: authorOffset)
+                errors.append(ParseError(
+                    severity: .error,
+                    line: pos.line,
+                    column: pos.column,
+                    message: "@author 块应在 @title 块内嵌套"
+                ))
+            }
+        }
+
+        // 检查 4: @footnote 未嵌装到 title
+        if source.contains("@footnote") {
+            if let title = doc.metadata.title, title.footnotes.isEmpty {
+                if let fnRange = source.range(of: "@footnote") {
+                    let offset = source.distance(from: source.startIndex, to: fnRange.lowerBound)
+                    let pos = source.position(at: offset)
+                    errors.append(ParseError(
+                        severity: .warning,
+                        line: pos.line,
+                        column: pos.column,
+                        message: "@footnote 块未能正确解析到 title 内"
+                    ))
+                }
+            }
+        }
+
+        // 检查 5: 关键字拼错（如 @titl{、@sction{、@nam = "..."）— @ 开头不在已知列表
+        // 已知关键字：块（用 {） + 行内（用 {key}）
+        // 已知字段名（按块）：
+        let knownKeywords = ["title", "abstract", "section", "subsection", "author", "footnote", "figure", "table", "equation", "cite", "ref"]
+        let knownFields = ["title", "name", "affiliation", "email", "orcid", "note", "corresponding",
+                           "marker", "label", "keywords", "caption", "columns", "rows",
+                           "path", "content"]
+        var searchStart = source.startIndex
+        while searchStart < source.endIndex {
+            guard let atRange = source.range(of: "@", range: searchStart..<source.endIndex) else { break }
+            let afterAt = source.index(after: atRange.lowerBound)
+            // 读关键字字符
+            var kEnd = afterAt
+            while kEnd < source.endIndex, source[kEnd].isLetter || source[kEnd] == "_" {
+                kEnd = source.index(after: kEnd)
+            }
+            let keyword = String(source[afterAt..<kEnd])
+            if !keyword.isEmpty && !knownKeywords.contains(keyword) && !knownFields.contains(keyword) {
+                // 检查后续是 { (块拼错) 还是 = (字段拼错)
+                let afterKw = source[kEnd...].drop(while: { $0.isWhitespace || $0.isNewline })
+                let nextChar = afterKw.first
+                let kind = (nextChar == "{") ? "块关键字" : (nextChar == "=") ? "字段" : "未知"
+                if nextChar == "{" || nextChar == "=" {
+                    let offset = source.distance(from: source.startIndex, to: atRange.lowerBound)
+                    let pos = source.position(at: offset)
+                    errors.append(ParseError(
+                        severity: .error,
+                        line: pos.line,
+                        column: pos.column,
+                        message: "未知的\(kind) @\(keyword)"
+                    ))
+                    break  // 只报第一个避免刷屏
+                }
+            }
+            searchStart = kEnd
+        }
+
+        return ParseResult(document: doc, errors: errors)
+    }
+
     /// 解析入口
     static func parse(_ source: String) -> PaperMLDocument {
         var doc = PaperMLDocument(metadata: .init(), sections: [])

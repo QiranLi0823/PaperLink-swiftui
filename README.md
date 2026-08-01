@@ -33,60 +33,42 @@ File 菜单下新增 **Settings…**（⌘,），弹出 macOS 玻璃感卡片：
 
 ## 支持的 PaperML 语法
 
-完整语法参考见 [`grammar/`](./grammar/)：顶层块见 [top-level.md](./grammar/top-level.md)，块级元素见 [blocks.md](./grammar/blocks.md)，行内元素见 [inline.md](./grammar/inline.md)。
+> **完整语法参考在 [`grammar/`](./grammar/)**：每种 block / 字段 / 引用规则的权威文档。
+> 速览版见下方。
 
-下面是常用语法速览：
+### 速览
 
 ```
 @title{
   @title = "..."
-  @author{
-    @name = "..."
-    @affiliation = "..."
-    @email = "..."
-    @orcid = "..."
-    @note = "equal_contribution"
-  }
-  @author{ ... }
-  @footnote{
-    @marker = "†"
-    @label = "..."
-    bare text here
-  }
+  @author{ @name = "..." @affiliation = "..." @email = "..." }
+  @footnote{ @marker = "†" @label = "..." bare text here }
 }
 
-@abstract{
-  @keywords = ["...", "..."]
-  abstract paragraph text...
-}
+@abstract{ @keywords = ["..."] abstract text... }
 
 @section Title              ← 一级章节（h2）
 @subsection Subtitle        ← 二级章节（h3，嵌进 @section 的 children）
 
-@figure{
-  @path = "figures/x.png"
-  @caption = "..."
-  @label = "fig:x"
-}
+@figure{ @path = "figures/x.png" @caption = "..." @label = "fig:x" }
+@table  { @caption = "..." @columns = [...] @rows = [[...], ...] }
+@equation{ @content = "..." @label = "eq:..." }
 
-@table{
-  @caption = "..."
-  @columns = ["...", "..."]
-  @rows = [["...", "..."], ...]
-}
-
-@equation{
-  @content = "\\hat{Y} = f_\\theta(X)"
-  @label = "eq:framework"
-}
-
-正文段落中可以用：
+正文段落中：
   @cite{key}    → 行内角标 [1] + key 名
   @ref{label}   → 角标编号
   $E = mc^2$    → KaTeX 行内数学
 ```
 
 **字段命名**：所有字段前缀 `@`，包括 `@title` 块内的 `title` 字段也写成 `@title`。
+
+### 详细文档
+
+| 主题 | 文档 |
+|---|---|
+| `@title` / `@author` / `@footnote` / `@abstract` / `@section` / `@subsection` | [grammar/top-level.md](./grammar/top-level.md) |
+| `@figure` / `@table` / `@equation` | [grammar/blocks.md](./grammar/blocks.md) |
+| `@cite` / `@ref` / `$...$` 行内数学 | [grammar/inline.md](./grammar/inline.md) |
 
 ## 渲染
 
@@ -257,6 +239,11 @@ PaperLink-swiftui/
 │   └── demo.pml                         # 论文示例源
 ├── doc_line/
 │   └── ROADMAP.md                       # 阶段性规划
+├── grammar/                             # PaperML 语法权威参考
+│   ├── README.md                        # 入口 + 词法约定
+│   ├── top-level.md                     # @title / @abstract / @section / @subsection
+│   ├── blocks.md                        # @figure / @table / @equation
+│   └── inline.md                        # @cite / @ref / 行内数学
 ├── scripts/
 │   └── notarize.sh                      # xcodebuild archive + notarytool + stapler
 └── PaperLink/

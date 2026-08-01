@@ -85,7 +85,9 @@ enum PaperMLLayout {
     /// 把 source 切成布局块。粗略扫顶层 + 顶层内的 @figure/@table/@equation。
     static func layout(_ source: String) -> [Block] {
         var blocks: [Block] = []
-        let lines = source.components(separatedBy: "\n")
+        // Sprint 9.18：先去掉 `%` 注释（行 + 块），注释内容被替换成空格但行号保持不变
+        let stripped = PaperMLParser.stripComments(source)
+        let lines = stripped.components(separatedBy: "\n")
         var i = 0
         var counter = KindCounter()
 
@@ -94,7 +96,9 @@ enum PaperMLLayout {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             // 空行 / 注释：跳过（不占渲染空间）
-            if trimmed.isEmpty || trimmed.hasPrefix("//") {
+            // Sprint 9.18：注释符号改成 `%`（行）+ `%%`（块首）
+            // 跨行块注释由 PaperMLParser.stripComments 在 layout 入口处统一去掉
+            if trimmed.isEmpty || trimmed.hasPrefix("%") {
                 i += 1
                 continue
             }
@@ -199,7 +203,7 @@ enum PaperMLLayout {
                 var j = i + 1
                 while j < lines.count {
                     let t = lines[j].trimmingCharacters(in: .whitespaces)
-                    if t.isEmpty || t.hasPrefix("//") { break }
+                    if t.isEmpty { break }
                     if t.hasPrefix("@") {
                         let head = String(t.split(separator: " ").first ?? Substring(t))
                         let knownSubfields = ["@content", "@label", "@caption", "@marker", "@name", "@affiliation", "@email", "@orcid", "@note", "@path", "@title", "@keywords", "@columns", "@rows", "@corresponding", "@author", "@footnote"]
@@ -229,7 +233,7 @@ enum PaperMLLayout {
             var j = i + 1
             while j < lines.count {
                 let t = lines[j].trimmingCharacters(in: .whitespaces)
-                if t.isEmpty || t.hasPrefix("//") { break }
+                if t.isEmpty { break }
                 if isTopLevelHeader(t, keyword: "title") || isTopLevelHeader(t, keyword: "abstract") ||
                    isTopLevelHeader(t, keyword: "section") || isTopLevelHeader(t, keyword: "subsection") ||
                    isTopLevelHeader(t, keyword: "figure") || isTopLevelHeader(t, keyword: "table") ||

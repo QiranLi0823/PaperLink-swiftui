@@ -485,6 +485,7 @@ struct LineNumberedEditor: NSViewRepresentable {
         ///   - "..." 字符串：systemGreen
         ///   - 数字：systemOrange
         ///   - // 注释：secondaryLabelColor
+        ///     （Sprint 9.18 改成 `%` 行注释 + `%%...%%` 块注释）
         ///
         /// 策略：先 reset 全文档到 labelColor；用 NSRegularExpression 匹配四种 token。
         /// @identifier 涂色时跳过字符串/注释内部范围（避免 `"author1@x.edu"` 里的 @ 被涂蓝）。
@@ -506,7 +507,15 @@ struct LineNumberedEditor: NSViewRepresentable {
                     if let r = m?.range { excludedRanges.append(r) }
                 }
             }
-            if let re = try? NSRegularExpression(pattern: #"//[^\n]*"#, options: []) {
+            // Sprint 9.18：注释规则改成 `%`（行）+ `%%...%%`（块，跨行）
+            // 行首 %：触发行注释到行尾；行首 %%：触发块注释到下一个 %%
+            // 用正则同时识别两种，匹配范围用于 @identifier 涂色排除
+            if let re = try? NSRegularExpression(pattern: #"%%[\s\S]*?%%"#, options: []) {
+                re.enumerateMatches(in: storage.string, options: [], range: fullRange) { m, _, _ in
+                    if let r = m?.range { excludedRanges.append(r) }
+                }
+            }
+            if let re = try? NSRegularExpression(pattern: #"(^|\n)\s*%[^\n]*"#, options: []) {
                 re.enumerateMatches(in: storage.string, options: [], range: fullRange) { m, _, _ in
                     if let r = m?.range { excludedRanges.append(r) }
                 }
@@ -522,8 +531,14 @@ struct LineNumberedEditor: NSViewRepresentable {
                     storage.addAttribute(.foregroundColor, value: numberColor, range: r)
                 }
             }
-            // 注释
-            if let re = try? NSRegularExpression(pattern: #"//[^\n]*"#, options: []) {
+            // Sprint 9.18：涂色行首 `%` 和 `%%...%%` 块注释（secondaryLabelColor）
+            if let re = try? NSRegularExpression(pattern: #"%%[\s\S]*?%%"#, options: []) {
+                re.enumerateMatches(in: storage.string, options: [], range: fullRange) { m, _, _ in
+                    guard let r = m?.range, r.length > 0 else { return }
+                    storage.addAttribute(.foregroundColor, value: commentColor, range: r)
+                }
+            }
+            if let re = try? NSRegularExpression(pattern: #"(^|\n)\s*%[^\n]*"#, options: []) {
                 re.enumerateMatches(in: storage.string, options: [], range: fullRange) { m, _, _ in
                     guard let r = m?.range, r.length > 0 else { return }
                     storage.addAttribute(.foregroundColor, value: commentColor, range: r)

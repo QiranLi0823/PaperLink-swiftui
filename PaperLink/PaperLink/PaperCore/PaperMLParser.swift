@@ -137,7 +137,7 @@ enum PaperMLParser {
     static func parse(_ source: String) -> PaperMLDocument {
         var doc = PaperMLDocument(metadata: .init(), sections: [])
 
-        // 去掉 // 注释（在切分顶层之前）
+        // 去掉 % 注释（在切分顶层之前）
         let stripped = stripComments(source)
 
         // 简单策略：扫描每个顶层块，按类型分发
@@ -853,21 +853,78 @@ enum PaperMLParser {
         return [.text(text)]
     }
 
-    /// 去掉 // 注释（从 // 到行尾）
-    private static func stripComments(_ source: String) -> String {
+    /// 去掉注释（Sprint 9.18：PaperML 用 `%` 作注释符号）
+    ///
+    /// 行注释 `%`：从当前 `%` 起到行尾全部忽略
+    ///   触发条件：当前行内 `%` 前面只有空白
+    ///   注：行首 `%`（包括 brace 块内的行首缩进）都满足
+    ///
+    /// 块注释 `%%...%%`：从 `%%` 开始到下一个 `%%` 之间全部忽略（可跨行）
+    ///   触发条件：当前行内第一个 `%%` 前面只有空白
+    ///   闭合 `%%` 不要求位置（允许行中任意位置）
+    ///
+    /// 行内 `%%`（前面有非空白）：按"行注释"处理（第一个 `%` 触发行注释，吃到行尾）
+    ///
+    /// 未闭合的块注释：忽略到文件末尾（不报错）
+    ///
+    /// 字面 `%`：放在文本中间（非行首）会被保留；想强制转义可用 `\@%`
+    /// （不过 PaperML 里 `%` 通常不出现，所以不强求转义）
+    ///
+    /// **关键**：注释内容从 result 中**彻底删除**（不是替换为空格），但保留换行，
+    /// 保证行数不变 → PaperMLLayout 用 stripped 算 anchor 时行号仍对得上源文件。
+    /// Sprint 9.18：从 private 改成 internal，让 PaperMLLayout 也能复用（layout 之前先去注释）
+    static func stripComments(_ source: String) -> String {
         var result = ""
         var i = source.startIndex
+
+        // 辅助：判断 source[i] 所在行的行首到 i 之间是否全部是空白/换行
+        func isAtLineStart(_ idx: String.Index) -> Bool {
+            var j = idx
+            while j > source.startIndex {
+                let prev = source.index(before: j)
+                let c = source[prev]
+                if c.isNewline { return true }
+                if !c.isWhitespace { return false }
+                j = prev
+            }
+            return true
+        }
+
         while i < source.endIndex {
-            if source[i] == "/", source.index(after: i) < source.endIndex,
-               source[source.index(after: i)] == "/" {
-                // 跳过到行尾
+            let c = source[i]
+
+            // 块注释：行首 %% → 删到下一个 %%（保留中间换行）
+            if c == "%",
+               source.index(after: i) < source.endIndex,
+               source[source.index(after: i)] == "%",
+               isAtLineStart(i) {
+                i = source.index(i, offsetBy: 2)
+                while i < source.endIndex {
+                    if source[i] == "%",
+                       source.index(after: i) < source.endIndex,
+                       source[source.index(after: i)] == "%" {
+                        i = source.index(i, offsetBy: 2)
+                        break
+                    }
+                    // 保留换行（行号稳定），其他字符丢掉
+                    if source[i].isNewline {
+                        result.append("\n")
+                    }
+                    i = source.index(after: i)
+                }
+                continue
+            }
+
+            // 行注释：行首 % → 删到行尾（保留换行）
+            if c == "%", isAtLineStart(i) {
                 while i < source.endIndex, !source[i].isNewline {
                     i = source.index(after: i)
                 }
-            } else {
-                result.append(source[i])
-                i = source.index(after: i)
+                continue
             }
+
+            result.append(c)
+            i = source.index(after: i)
         }
         return result
     }

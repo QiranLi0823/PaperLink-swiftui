@@ -295,7 +295,9 @@ enum PaperMLParser {
         let body = trimmed.dropFirst("@author".count)
         let trimmedBody = body.drop(while: { $0.isWhitespace })
         guard trimmedBody.first == "{" else { return nil }
-        let inner = String(trimmedBody.dropFirst().dropLast())  // 简单去掉首尾 {
+        // 用 findMatchingBrace 找真正闭合的 }（容错）
+        guard let closeBrace = findMatchingBrace(in: trimmedBody, from: trimmedBody.startIndex) else { return nil }
+        let inner = String(trimmedBody[trimmedBody.index(after: trimmedBody.startIndex)..<closeBrace])
         let kv = parseKeyValues(inner)
         return Author(
             name: kv["name"] ?? "",
@@ -313,13 +315,60 @@ enum PaperMLParser {
         let body = trimmed.dropFirst("@footnote".count)
         let trimmedBody = body.drop(while: { $0.isWhitespace })
         guard trimmedBody.first == "{" else { return nil }
-        let inner = String(trimmedBody.dropFirst().dropLast())
-        let kv = parseKeyValues(inner)
-        return Footnote(
-            marker: kv["marker"] ?? "",
-            label: kv["label"],
-            text: kv["__text__"] ?? ""
-        )
+        // 用 findMatchingBrace 找真正闭合的 }（容错：避免 dropFirst/dropLast 误删中间的 }）
+        guard let closeBrace = findMatchingBrace(in: trimmedBody, from: trimmedBody.startIndex) else { return nil }
+        let inner = String(trimmedBody[trimmedBody.index(after: trimmedBody.startIndex)..<closeBrace])
+        let (marker, label, rawText) = parseFootnoteFields(inner)
+        return Footnote(marker: marker, label: label, text: rawText)
+    }
+
+    /// 手写 @footnote 内部字段解析：先找 @marker / @label，剩下文本
+    private static func parseFootnoteFields(_ body: String) -> (marker: String, label: String?, text: String) {
+        var marker = ""
+        var label: String? = nil
+        var remaining = Substring(body)
+
+        // 扫描 @marker = "..." 和 @label = "..."
+        while !remaining.isEmpty {
+            remaining = Substring(remaining.drop(while: { $0.isWhitespace || $0.isNewline }))
+            if remaining.isEmpty { break }
+
+            // 找 @ 开头
+            guard remaining.first == "@" else { break }
+            remaining = remaining.dropFirst()  // 跳 @
+
+            // 读 key
+            var kEnd = remaining.startIndex
+            while kEnd < remaining.endIndex, remaining[kEnd].isLetter || remaining[kEnd].isNumber || remaining[kEnd] == "_" {
+                kEnd = remaining.index(after: kEnd)
+            }
+            let key = String(remaining[remaining.startIndex..<kEnd])
+            remaining = Substring(remaining[kEnd...])
+
+            // 跳过空白和 =
+            remaining = Substring(remaining.drop(while: { $0.isWhitespace || $0.isNewline || $0 == "=" }))
+            remaining = Substring(remaining.drop(while: { $0.isWhitespace || $0.isNewline }))
+
+            // 读字符串字面量（宽容配对任何引号）
+            if remaining.first == "\"" || remaining.first == "\u{201C}" || remaining.first == "\u{201D}" {
+                let valueStart = remaining.index(after: remaining.startIndex)
+                let closeChars: Set<Character> = ["\"", "\u{201C}", "\u{201D}"]
+                if let closeQuote = remaining[valueStart...].firstIndex(where: { closeChars.contains($0) }) {
+                    let value = String(remaining[valueStart..<closeQuote])
+                    if key == "marker" { marker = value }
+                    else if key == "label" { label = value }
+                    remaining = Substring(remaining[remaining.index(after: closeQuote)...])
+                } else {
+                    break
+                }
+            } else {
+                break
+            }
+        }
+
+        // 剩下的全部当裸文本
+        let rawText = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (marker, label, rawText)
     }
 
     private static func parseAbstract(_ body: String) -> AbstractBlock? {
@@ -482,28 +531,24 @@ enum PaperMLParser {
             remaining = Substring(remaining.drop(while: { $0.isWhitespace || $0.isNewline }))
             if remaining.isEmpty { break }
 
-            // 读 key
-            var kEnd = remaining.startIndex
-            while kEnd < remaining.endIndex, remaining[kEnd].isLetter || remaining[kEnd] == "_" {
+            // 读 key（可选 @ 前缀）
+            var kStart = remaining.startIndex
+            if kStart < remaining.endIndex, remaining[kStart] == "@" {
+                kStart = remaining.index(after: kStart)
+            }
+            var kEnd = kStart
+            while kEnd < remaining.endIndex, remaining[kEnd].isLetter || remaining[kEnd].isNumber || remaining[kEnd] == "_" {
                 kEnd = remaining.index(after: kEnd)
             }
-            let key = String(remaining[remaining.startIndex..<kEnd])
+            let key = String(remaining[kStart..<kEnd])
             remaining = Substring(remaining[kEnd...])
 
             // 看 key 后面是否有 = （即是否是真正的 key=value）
             // 跳过空白检查下一个非空白字符
             let afterKeyWhitespace = remaining.drop(while: { $0.isWhitespace || $0.isNewline })
             if afterKeyWhitespace.first != "=" {
-                // 不是 key=value 形式——说明这是裸文本
-                // 把 key 之前的剩余和当前 key 拼起来当 __text__
-                // 实际上：把整个 remaining 当裸文本（之前的 consumed key 也算）
-                let textRaw = String(Substring(remaining))
-                if !textRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    // 累积到 __text__
-                    let prev = result["__text__"] ?? ""
-                    result["__text__"] = prev.isEmpty ? textRaw.trimmingCharacters(in: .whitespacesAndNewlines) : prev + " " + textRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                remaining = Substring("")
+                // 不是 key=value 形式——直接 break，不向 result 注入任何残留文本
+                // 容错策略：宁可丢字段，也不要让源码透传到 AST
                 break
             }
 
@@ -511,10 +556,11 @@ enum PaperMLParser {
             remaining = Substring(remaining.drop(while: { $0.isWhitespace || $0 == "=" }))
 
             // 读 value（"..." 或 [...]）
-            if remaining.first == "\"" {
-                // 字符串字面量
+            if let openQuote = remaining.first, openQuote == "\"" || openQuote == "\u{201C}" || openQuote == "\u{201D}" {
+                // 字符串字面量：宽容配对——任何引号（ASCII / 中文左右弯）都能闭合
                 let valueStart = remaining.index(after: remaining.startIndex)
-                if let closeQuote = remaining[valueStart...].firstIndex(of: "\"") {
+                let closeChars: Set<Character> = ["\"", "\u{201C}", "\u{201D}"]
+                if let closeQuote = remaining[valueStart...].firstIndex(where: { closeChars.contains($0) }) {
                     let value = String(remaining[valueStart..<closeQuote])
                     result[key] = value
                     remaining = Substring(remaining[remaining.index(after: closeQuote)...])
@@ -551,11 +597,8 @@ enum PaperMLParser {
             }
         }
 
-        // 收集剩下的裸文本（@footnote 块最后的描述文本）
-        let leftover = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !leftover.isEmpty {
-            result["__text__"] = String(leftover)
-        }
+        // 容错策略：不再向 result 注入 __text__ 累积，避免源码透传到 AST
+        // 注释：之前在循环末尾累积 leftover 到 __text__，会导致未消化的源码被 parseFootnote 当 text
         return result
     }
 

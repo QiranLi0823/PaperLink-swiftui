@@ -340,6 +340,10 @@ struct HTMLPreview: NSViewRepresentable {
 
         @MainActor
         @objc func onFollowCursorAnchor(_ note: Notification) {
+            // Sprint 9.15：按钮关闭时直接 no-op，不再 evaluate。
+            // 源头（LineNumberedEditor.postFollowCursorFraction）已 gate，
+            // 这里再守一道防止别处误发通知时 preview 失控跟随。
+            guard SidebarState.shared.followCursorMode else { return }
             guard let userInfo = note.userInfo,
                   let kind = userInfo["kind"] as? String,
                   let index = userInfo["index"] as? Int,

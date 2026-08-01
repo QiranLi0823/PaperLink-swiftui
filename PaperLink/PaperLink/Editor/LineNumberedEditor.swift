@@ -392,6 +392,9 @@ struct LineNumberedEditor: NSViewRepresentable {
 
         private func postFollowCursorFraction() {
             guard let tv = textView else { return }
+            // Sprint 9.15：跟随光标按钮关闭时不发通知。deeper 的 Coordinator 也会
+            // 再守一道，但源头先节流最干净。
+            guard MainActor.assumeIsolated({ SidebarState.shared.followCursorMode }) else { return }
             // Sprint 9.7：editor → preview 通过 (kind, index, progress) 锚点对齐，
             // preview 端用真实 DOM getBoundingClientRect() 拿高度（避免预估不准）。
             let nsText = tv.string as NSString

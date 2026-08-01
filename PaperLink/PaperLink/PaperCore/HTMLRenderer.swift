@@ -226,45 +226,198 @@ enum HTMLRenderer {
     }
 
     private static let css = """
-    body {
-        font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-        max-width: 820px;
-        margin: 32px auto;
-        padding: 0 24px;
-        line-height: 1.6;
-        color: #1a1a1a;
-        background: #fff;
+    :root {
+        color-scheme: light dark;
+        --fg: #1d1d1f;
+        --fg-secondary: #6e6e73;
+        --fg-tertiary: #98989d;
+        --bg: #ffffff;
+        --bg-subtle: #fafafb;
+        --border: #e5e5e7;
+        --accent: #0066cc;
+        --danger: #c00;
     }
-    .title-block { text-align: center; margin-bottom: 24px; }
-    .paper-title { font-size: 22px; font-weight: 700; margin: 0 0 12px; }
-    .authors { font-size: 14px; color: #444; }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --fg: #f5f5f7;
+            --fg-secondary: #a1a1a6;
+            --fg-tertiary: #6e6e73;
+            --bg: #1c1c1e;
+            --bg-subtle: #2c2c2e;
+            --border: #38383a;
+            --accent: #2997ff;
+            --danger: #ff6961;
+        }
+    }
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", sans-serif;
+        max-width: 100%;
+        margin: 0 auto;
+        padding: 40px 28px 64px;
+        line-height: 1.65;
+        color: var(--fg);
+        background: var(--bg);
+        font-size: 15px;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+    }
+    .title-block {
+        text-align: center;
+        margin-bottom: 40px;
+        padding-bottom: 28px;
+        border-bottom: 1px solid var(--border);
+    }
+    .paper-title {
+        font-size: 26px;
+        font-weight: 700;
+        margin: 0 0 18px;
+        letter-spacing: -0.01em;
+        line-height: 1.3;
+    }
+    .authors {
+        font-size: 14px;
+        color: var(--fg-secondary);
+        line-height: 1.8;
+    }
     .author { white-space: nowrap; }
-    .aff, .email { color: #666; font-size: 12px; }
-    .corr { color: #c00; font-weight: 700; }
-    .fn-mark { color: #c00; margin-left: 1px; }
-    .footnotes { margin-top: 8px; font-size: 12px; color: #666; text-align: left; }
+    .author b { color: var(--fg); font-weight: 600; }
+    .aff, .email { color: var(--fg-tertiary); font-size: 12px; }
+    .fn-mark { color: var(--danger); margin-left: 1px; font-size: 11px; }
+    .footnotes {
+        margin-top: 14px;
+        font-size: 12px;
+        color: var(--fg-secondary);
+        text-align: left;
+        line-height: 1.5;
+    }
     .footnote { margin: 2px 0; }
-    .abstract { background: #f7f7f9; border-left: 3px solid #3a7; padding: 12px 16px; margin: 16px 0; font-size: 14px; }
-    .abstract h2 { font-size: 14px; margin: 0 0 8px; text-transform: uppercase; color: #555; }
-    .keywords { font-size: 12px; color: #555; }
-    h2.section-h1 { font-size: 20px; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 32px; }
-    h3.section-h2 { font-size: 16px; margin-top: 20px; color: #222; }
-    .subsection-group { margin-left: 16px; }
-    p { text-align: justify; margin: 8px 0; }
-    .cite, .ref { color: #c33; font-size: 11px; padding: 0 1px; }
-    .cite-key, .ref-key { color: #888; font-size: 10px; margin: 0 2px; font-family: monospace; }
-    .math { background: #f0f4f8; padding: 1px 4px; border-radius: 3px; font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
-    figure { margin: 16px 0; }
-    .figure-img { max-width: 100%; height: auto; display: block; margin: 0 auto; border: 1px solid #ddd; }
-    .figure-placeholder { background: #eef; border: 1px dashed #99c; padding: 40px 16px; text-align: center; color: #669; font-family: monospace; }
-    .table-figure { margin: 16px 0; }
-    table { border-collapse: collapse; width: 100%; font-size: 13px; }
-    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-    th { background: #f5f5f5; font-weight: 600; }
-    figcaption { font-size: 12px; color: #555; margin-top: 6px; text-align: left; }
-    .label { color: #888; font-family: monospace; }
-    .equation { text-align: center; margin: 16px 0; padding: 8px; background: #fafafa; border-radius: 4px; }
-    .eq-content { font-family: "STIX", "Latin Modern Math", serif; font-style: italic; }
-    .eq-label { display: block; font-size: 11px; color: #888; margin-top: 4px; }
+    .abstract {
+        background: var(--bg-subtle);
+        border-radius: 8px;
+        padding: 20px 24px;
+        margin: 0 0 40px;
+        font-size: 14px;
+    }
+    .abstract h2 {
+        font-size: 11px;
+        font-weight: 600;
+        margin: 0 0 10px;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: var(--fg-tertiary);
+    }
+    .abstract p { margin: 0 0 8px; text-align: justify; }
+    .keywords {
+        font-size: 12px;
+        color: var(--fg-secondary);
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+    }
+    .keywords b { color: var(--fg); font-weight: 600; }
+    h2.section-h1 {
+        font-size: 22px;
+        font-weight: 700;
+        margin: 40px 0 16px;
+        letter-spacing: -0.01em;
+    }
+    h3.section-h2 {
+        font-size: 17px;
+        font-weight: 600;
+        margin: 28px 0 12px;
+        color: var(--fg);
+    }
+    .subsection-group { margin-left: 0; }
+    p { text-align: justify; margin: 10px 0; }
+    .cite {
+        color: var(--accent);
+        font-size: 11px;
+        padding: 0 1px;
+        font-weight: 500;
+    }
+    .cite-key, .ref-key {
+        color: var(--fg-tertiary);
+        font-size: 10px;
+        margin: 0 3px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .ref {
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 500;
+    }
+    figure { margin: 28px 0; }
+    .figure-img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+        border-radius: 6px;
+    }
+    .figure-placeholder {
+        background: var(--bg-subtle);
+        border: 1px dashed var(--border);
+        border-radius: 6px;
+        padding: 48px 16px;
+        text-align: center;
+        color: var(--fg-tertiary);
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+    }
+    .table-figure { margin: 28px 0; }
+    table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    th, td {
+        border-bottom: 1px solid var(--border);
+        padding: 10px 14px;
+        text-align: left;
+    }
+    tr:last-child td { border-bottom: none; }
+    th {
+        background: var(--bg-subtle);
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--fg-secondary);
+    }
+    figcaption {
+        font-size: 12px;
+        color: var(--fg-secondary);
+        margin-top: 8px;
+        text-align: left;
+        line-height: 1.5;
+    }
+    .label {
+        color: var(--fg-tertiary);
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        margin-left: 6px;
+    }
+    .equation {
+        text-align: center;
+        margin: 24px 0;
+        padding: 14px;
+        background: var(--bg-subtle);
+        border-radius: 6px;
+    }
+    .eq-content {
+        font-family: "STIX", "Latin Modern Math", serif;
+        font-style: italic;
+    }
+    .eq-label {
+        display: block;
+        font-size: 11px;
+        color: var(--fg-tertiary);
+        margin-top: 6px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
     """
 }

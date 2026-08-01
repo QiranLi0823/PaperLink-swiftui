@@ -48,6 +48,17 @@ final class PaperDocument: ObservableObject {
         self.lastSavedSource = initial
         self.recompute(initial)
 
+        // 监听 sidebar 文件树点击
+        NotificationCenter.default.addObserver(
+            forName: .paperLinkOpenFile,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            if let url = note.object as? URL {
+                self?.open(url: url)
+            }
+        }
+
         $source
             .removeDuplicates()
             .sink { [weak self] newSource in

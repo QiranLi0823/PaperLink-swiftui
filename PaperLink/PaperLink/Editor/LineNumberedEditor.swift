@@ -34,8 +34,11 @@ struct LineNumberedEditor: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.allowsUndo = true
         textView.isHorizontallyResizable = false
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainerInset = NSSize(width: 12, height: 10)
         textView.string = text
+        textView.backgroundColor = NSColor.textBackgroundColor
+        textView.drawsBackground = true
+        textView.insertionPointColor = NSColor.controlAccentColor
         scrollView.hasVerticalRuler = false
         scrollView.hasHorizontalRuler = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -50,7 +53,7 @@ struct LineNumberedEditor: NSViewRepresentable {
             gutter.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             gutter.topAnchor.constraint(equalTo: container.topAnchor),
             gutter.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            gutter.widthAnchor.constraint(equalToConstant: 44),
+            gutter.widthAnchor.constraint(equalToConstant: 48),
 
             scrollView.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -159,13 +162,13 @@ class GutterView: NSView {
             return
         }
 
-        // 背景
-        NSColor.windowBackgroundColor.setFill()
+        // 背景：略深于窗口底色
+        NSColor.controlBackgroundColor.setFill()
         dirtyRect.fill()
 
-        // 右边界线
-        NSColor.gray.withAlphaComponent(0.3).setFill()
-        NSRect(x: bounds.width - 1, y: dirtyRect.origin.y, width: 1, height: dirtyRect.height).fill()
+        // 右边界线（更淡）
+        NSColor.separatorColor.setFill()
+        NSRect(x: bounds.width - 0.5, y: dirtyRect.origin.y, width: 0.5, height: dirtyRect.height).fill()
 
         let nsText = textStorage.string as NSString
         let totalChars = nsText.length
@@ -210,17 +213,22 @@ class GutterView: NSView {
                 continue
             }
 
-            // 错误行红底
+            // 错误行红底（柔和）
             if errorLines.contains(line) {
-                NSColor.red.withAlphaComponent(0.15).setFill()
+                NSColor.systemRed.withAlphaComponent(0.10).setFill()
                 NSRect(x: 0, y: gutterY, width: bounds.width, height: drawHeight).fill()
+                // 左侧 2pt 红条
+                NSColor.systemRed.setFill()
+                NSRect(x: 0, y: gutterY, width: 2, height: drawHeight).fill()
             }
 
             // 行号
             let lineNumString = "\(line)" as NSString
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                .foregroundColor: errorLines.contains(line) ? NSColor.red : NSColor.secondaryLabelColor
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: errorLines.contains(line)
+                    ? NSColor.systemRed
+                    : NSColor.tertiaryLabelColor
             ]
             let textSize = lineNumString.size(withAttributes: attrs)
             let drawX = bounds.width - textSize.width - 6

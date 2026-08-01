@@ -4,9 +4,16 @@ macOS SwiftUI 论文编辑器。
 
 ## 当前状态
 
-启动时加载**上次打开的 PaperML 文件**（若无则加载 `Resources/demo.pml`）到左侧，右侧用 WKWebView 实时渲染为论文样式 HTML。
+启动时加载**上次打开的 PaperML 文件**（若无则加载 `Resources/demo.pml`），左侧 editor，右侧 WKWebView 实时渲染为论文样式 HTML。窗口左侧可选 **sidebar**（项目文件树 / 图片列表），用标题栏的 segmented Picker 切换模式，再点同一个按钮收起。
 
 支持 Open / Save / Save As / Rename（⌘O / ⌘S / ⌘⇧S / ⌘R）。左侧编辑器带**行号 + 错误行红底高亮**，底部状态栏显示解析错误数量。
+
+## 布局
+
+- **三栏**：sidebar（220pt，可隐藏）+ editor（minWidth 380）+ preview（minWidth 380）
+- **editor / preview 1:1**：HSplitView 对称 minWidth，初始等宽
+- **sidebar 切换**：标题栏 segmented Picker（📁 项目 / 🖼 图片），再点同一项收起整个 sidebar
+- **窗口标题**：固定显示 "PaperLink"（不再显示当前文件名）
 
 ## 支持的 PaperML 语法
 
@@ -64,21 +71,22 @@ macOS SwiftUI 论文编辑器。
 ## 渲染
 
 - 标题居中 + 作者列表（含 affiliation、email、corresponding * 标记）
-- Abstract 灰色背景框 + keywords
+- Abstract 圆角背景框 + keywords
 - 一级 / 二级章节嵌套（subsection 缩进嵌入父 section）
-- 段落两端对齐，行内 `@cite` 红角标
+- 段落两端对齐，行内 `@cite` 蓝色角标
 - `@figure` 真图渲染（图放 `PaperLink/Resources/figures/`）
-- `@table` 真实 HTML 表格
+- `@table` 真实 HTML 表格（圆角 + 斑马头）
 - `@equation` + `$...$` 行内数学——KaTeX CDN 渲染
 - 200ms debounce 实时刷新
+- **CSS variables**：自动适配 macOS 深色模式
 
 ## 编辑器功能
 
-- **行号 gutter**：左侧 44pt 灰色条带，行号右对齐
-- **错误行红底**：`parseWithErrors` 报告的 ParseError 行号在 gutter 内画红底 + 行号变红
-- **文件名紧凑 toolbar**：顶部只显示当前文件名，未保存时旁边红点
-- **点击文件名重命名**：触发内联 TextField 编辑
+- **行号 gutter**：左侧 48pt 灰色条带，行号右对齐，monospaced digit font
+- **错误行高亮**：`parseWithErrors` 报告的 ParseError 行号在 gutter 内画红色 10% 背景 + 左侧 2pt 红条，行号变红
 - **持久化**：上次打开的文件路径存到 `UserDefaults[PaperLink.lastOpenedFilePath]`
+- **重命名**：⌘R 触发同目录下重命名（移动文件 + 更新持久化路径）
+- **现代 CSS**：HTMLRenderer 使用 CSS variables，自动适配 light/dark mode；body `max-width: 100%` + `overflow-x: hidden` 防止 WKWebView 在窄容器内横向溢出
 
 ## 不做什么（明确边界）
 
@@ -110,20 +118,23 @@ PaperLink-swiftui/
 │   └── ROADMAP.md                       # 阶段性规划
 └── PaperLink/
     └── PaperLink/
-        ├── PaperLinkApp.swift           # @main 入口 + File 菜单
-        ├── ContentView.swift            # HSplitView 双栏 + 紧凑 toolbar
+        ├── PaperLinkApp.swift           # @main 入口 + File 菜单 + sidebar toolbar
+        ├── ContentView.swift            # 三栏布局（HStack sidebar + HSplitView editor/preview）
         ├── Assets.xcassets/
         ├── Models/
-        │   └── PaperDocument.swift      # @MainActor + Combine debounce + 文件 I/O
+        │   ├── PaperDocument.swift      # @MainActor + Combine debounce + 文件 I/O
+        │   └── SidebarState.swift       # sidebar 全局状态（isVisible / activeMode）
         ├── PaperCore/
         │   ├── PaperMLAST.swift         # AST 节点定义
         │   ├── PaperMLParser.swift      # 纯 Swift 解析器（parseWithErrors 报错）
         │   ├── ParseError.swift         # ParseError + ParseResult + String.offset→line/col
-        │   └── HTMLRenderer.swift       # AST → HTML + KaTeX CDN
+        │   └── HTMLRenderer.swift       # AST → HTML + KaTeX CDN + modern CSS
         ├── Editor/
-        │   └── LineNumberedEditor.swift # NSTextView 包装 + GutterView 行号
+        │   ├── LineNumberedEditor.swift # NSTextView 包装 + GutterView 行号
+        │   └── SidebarView.swift        # sidebar 容器（项目 / 图片）+ ProjectNavigatorView + FiguresGridView
         ├── FileSystem/
-        │   └── ProjectManager.swift     # NSOpenPanel / NSSavePanel + UTF-8 I/O
+        │   ├── ProjectManager.swift     # NSOpenPanel / NSSavePanel + UTF-8 I/O
+        │   └── ProjectTreeManager.swift # 扫描目录构建 FileNode 树
         └── Resources/
             ├── demo.pml                 # Bundle 内副本（首次启动加载）
             └── figures/                 # demo 引用的图
@@ -135,3 +146,4 @@ PaperLink-swiftui/
 - **解析容错有限**：5 种错误检测（缺 title/abstract、孤立 @author、@footnote 无 title footnote、未知关键字/字段）。删大括号、删 `@` 等破坏性编辑不会崩溃但可能漏报。
 - **KaTeX CDN 延迟**：首次打开 ~5s 加载，之后缓存。
 - **demo.pml 必须用 ASCII 直引号 `"`**：弯引号 `""` 也支持但兼容性需测。
+- **HSplitView 比例不可拖动**：SwiftUI 的 HSplitView 在 macOS 上底层是 NSSplitView，但无法用 SwiftUI API 设置初始 divider 位置或响应拖动事件做持久化；当前只能用对称 minWidth 保证初次启动 1:1，拖动 splitter 后比例不会保存。如需可拖动+持久化，需改用 `NSSplitViewController`（AppKit）。

@@ -19,6 +19,9 @@ enum HTMLRenderer {
     /// - Parameter rootURL: 当前 .pml 文件的所在目录。`@path` 里的 `figures/xxx.png` 优先从这里解析；
     ///                     找不到再 fallback 到 Bundle.main（开发期 demo 图）。传 nil 时只查 Bundle。
     static func render(_ doc: PaperMLDocument, rootURL: URL? = nil) -> String {
+        // Sprint 9.7：每个 block 加 data-block-kind + data-block-index（按出现次序），
+        // JS 端通过 querySelectorAll 找节点 getBoundingClientRect() 拿真实渲染 y。
+        var idx = BlockIndices()
         var html = ""
         html += "<!DOCTYPE html>\n<html><head><meta charset='utf-8'>"
         html += "<style>\(css)\n</style>"
@@ -42,16 +45,28 @@ enum HTMLRenderer {
         html += "</head><body>"
 
         if let title = doc.metadata.title {
-            html += renderTitle(title)
+            html += renderTitle(title, indices: &idx)
         }
         if let abs = doc.metadata.abstract {
-            html += renderAbstract(abs)
+            html += renderAbstract(abs, indices: &idx)
         }
         for section in doc.sections {
-            html += renderSection(section, rootURL: rootURL)
+            html += renderSection(section, rootURL: rootURL, indices: &idx)
         }
         html += "</body></html>"
         return html
+    }
+
+    /// Sprint 9.7：每种 block 的出现次序计数器（用于 data-block-index）
+    private struct BlockIndices {
+        var title = 0
+        var abstract = 0
+        var section = 0
+        var subsection = 0
+        var figure = 0
+        var table = 0
+        var paragraph = 0
+        var equation = 0
     }
 
     // MARK: - 公共：图路径 → 相对路径（HTML 里的 <img src>）
@@ -94,7 +109,7 @@ enum HTMLRenderer {
 
     // MARK: - Title / Abstract
 
-    private static func renderTitle(_ title: TitleBlock) -> String {
+    private static func renderTitle(_ title: TitleBlock, indices: inout BlockIndices) -> String {
         // footnote label → marker 映射（例如 "equal_contribution" → "†"）
         let labelToMarker: [String: String] = Dictionary(
             uniqueKeysWithValues: title.footnotes.compactMap { fn in
@@ -103,7 +118,9 @@ enum HTMLRenderer {
             }
         )
 
-        var s = "<div class='title-block'>"
+        let idx = indices.title
+        indices.title += 1
+        var s = "<div class='title-block' data-block-kind='title' data-block-index='\(idx)'>"
         s += "<h1 class='paper-title'>\(escape(title.title))</h1>"
         s += "<div class='authors'>"
         for (idx, author) in title.authors.enumerated() {
@@ -133,8 +150,10 @@ enum HTMLRenderer {
         return s
     }
 
-    private static func renderAbstract(_ abs: AbstractBlock) -> String {
-        var s = "<div class='abstract'>"
+    private static func renderAbstract(_ abs: AbstractBlock, indices: inout BlockIndices) -> String {
+        let idx = indices.abstract
+        indices.abstract += 1
+        var s = "<div class='abstract' data-block-kind='abstract' data-block-index='\(idx)'>"
         s += "<h2>Abstract</h2>"
         for p in abs.paragraphs {
             s += "<p>\(escape(p))</p>"
@@ -148,17 +167,27 @@ enum HTMLRenderer {
 
     // MARK: - Section
 
-    private static func renderSection(_ section: Section, rootURL: URL?) -> String {
+    private static func renderSection(_ section: Section, rootURL: URL?, indices: inout BlockIndices) -> String {
         let levelClass = section.level == .section ? "section-h1" : "section-h2"
         let tag = section.level == .section ? "h2" : "h3"
-        var s = "<\(tag) class='\(levelClass)'>\(escape(section.title))</\(tag)>"
+        let kind = section.level == .section ? "section" : "subsection"
+        let idx: Int
+        switch section.level {
+        case .section:
+            idx = indices.section
+            indices.section += 1
+        case .subsection:
+            idx = indices.subsection
+            indices.subsection += 1
+        }
+        var s = "<\(tag) class='\(levelClass)' data-block-kind='\(kind)' data-block-index='\(idx)'>\(escape(section.title))</\(tag)>"
         for block in section.blocks {
-            s += renderBlock(block, rootURL: rootURL)
+            s += renderBlock(block, rootURL: rootURL, indices: &indices)
         }
         // 递归渲染嵌套的 subsection
         for child in section.children {
             s += "<div class='subsection-group'>"
-            s += renderSection(child, rootURL: rootURL)
+            s += renderSection(child, rootURL: rootURL, indices: &indices)
             s += "</div>"
         }
         return s
@@ -166,12 +195,16 @@ enum HTMLRenderer {
 
     // MARK: - Block
 
-    private static func renderBlock(_ block: Block, rootURL: URL?) -> String {
+    private static func renderBlock(_ block: Block, rootURL: URL?, indices: inout BlockIndices) -> String {
         switch block {
         case .paragraph(let inlines):
-            return "<p>\(renderInlines(inlines))</p>"
+            let idx = indices.paragraph
+            indices.paragraph += 1
+            return "<p data-block-kind='paragraph' data-block-index='\(idx)'>\(renderInlines(inlines))</p>"
         case .figure(let fig):
-            var s = "<figure>"
+            let idx = indices.figure
+            indices.figure += 1
+            var s = "<figure data-block-kind='figure' data-block-index='\(idx)'>"
             if let rel = figureRelativePath(fig.path, rootURL: rootURL) {
                 s += "<img src='\(escape(rel))' alt='\(escape(fig.caption))' class='figure-img' />"
             } else {
@@ -182,7 +215,9 @@ enum HTMLRenderer {
             s += "</figcaption></figure>"
             return s
         case .table(let tbl):
-            var s = "<figure class='table-figure'>"
+            let idx = indices.table
+            indices.table += 1
+            var s = "<figure class='table-figure' data-block-kind='table' data-block-index='\(idx)'>"
             s += "<table>"
             s += "<thead><tr>"
             for col in tbl.columns {
@@ -202,8 +237,9 @@ enum HTMLRenderer {
             s += "</figcaption></figure>"
             return s
         case .equation(let eq):
-            // content 已经是 LaTeX 源码，包成 $$...$$ 让 KaTeX 块级渲染
-            return "<div class='equation'>" +
+            let idx = indices.equation
+            indices.equation += 1
+            return "<div class='equation' data-block-kind='equation' data-block-index='\(idx)'>" +
                    "$\(escape(eq.content))$" +
                    (eq.label.map { "<span class='eq-label'>\(escape($0))</span>" } ?? "") +
                    "</div>"
@@ -250,6 +286,10 @@ enum HTMLRenderer {
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
     }
+
+    /// Sprint 9.7：占位（实际滚动逻辑由 HTMLPreview 的 userScript 注入 window.scrollToBlock，
+/// 这里保留以备未来直接在渲染时内联）。
+    private static let blockAnchorScript: String = ""
 
     private static let css = """
     :root {

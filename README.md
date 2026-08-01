@@ -109,10 +109,71 @@ File 菜单下新增 **Settings…**（⌘,），弹出 macOS 玻璃感卡片：
 - **自动闭合 + 智能缩进（Sprint 8.2）**：敲 `{[("` 自动加闭合字符 + 光标居中；回车在 `{}` 之间自动插入对齐换行；普通回车保持当前行行首缩进；通过 `NSTextViewDelegate.textView(_:shouldChangeTextIn:replacementString:)` 拦截
 - **gutter 跳行 + 当前行高亮（Sprint 8.3）**：点击 gutter 行号 → textView 选中整行 + 滚动到可见；监听 `NSTextView.didChangeSelectionNotification` 实时更新当前行高亮（左侧 2pt accent 条 + 6% accent 背景）
 - **⌘F 查找（Sprint 8.4）**：顶部悬浮 FindBar 毛玻璃卡，输入实时匹配 + 系统黄色 `findHighlightColor` 背景高亮；⌘G / ⇧⌘G 跳下一个/上一个 + `showFindIndicator(for:)` 黄色聚焦框；ESC 关闭；通过 NotificationCenter 跨 SwiftUI/NSViewRepresentable 通信
+- **跟随光标（Sprint 9）**：toolbar 第三个按钮（`arrow.left.arrow.right.square`），开启后编辑器选区变化时自动算 anchor（光标行 → `(kind, index, progress)` 三元组），通过 `paperLinkFollowCursorAnchor` 通知推给 `WKWebView`，调用 `window.scrollToBlock(kind, index, progress)` 滚动预览内容到对应 DOM 节点；关闭按钮立即停止同步。详见下节「[跟随光标实现细节](#跟随光标实现细节)」。
 - **持久化**：上次打开的文件存为 security-scoped bookmark（`UserDefaults[PaperLink.lastOpenedBookmark]`）；最近文件列表存书签数组（`UserDefaults[PaperLink.recentBookmarks]`）
 - **重命名**：⌘R 触发同目录下重命名（移动文件 + 更新持久化路径）
 - **Finder 双击 / 命令行 `open file.pml`**：通过 `.onOpenURL` 把传入 URL 转给 `document.open(url:)`，实现文件类型关联的端到端打通
 - **现代 CSS**：HTMLRenderer 使用 CSS variables，自动适配 light/dark mode；body `max-width: 100%` + `overflow-x: hidden` 防止 WKWebView 在窄容器内横向溢出
+
+## 跟随光标实现细节
+
+> **目标**：编辑器光标行变化时，右侧预览自动滚到对应渲染节点，并把节点中央对齐到视窗中央。
+
+### 数据流
+
+```
+┌─────────────────┐    50ms debounce     ┌──────────────────────────┐
+│ NSTextView      │ ───────────────────▶ │ EditorSplitViewController │
+│ didChangeSel    │  cursor line         │  PaperMLLayout.anchor()  │
+└─────────────────┘                      │  → (kind, index, prog)   │
+                                         └────────────┬─────────────┘
+                                                      │ NotificationCenter
+                                                      ▼
+                                         ┌──────────────────────────┐
+                                         │ HTMLPreview.Coordinator  │
+                                         │  → evaluateJavaScript    │
+                                         └────────────┬─────────────┘
+                                                      │ JS
+                                                      ▼
+                                         ┌──────────────────────────┐
+                                         │ window.scrollToBlock()   │
+                                         │  → querySelector         │
+                                         │  → getBoundingClientRect │
+                                         │  → window.scrollTo       │
+                                         └──────────────────────────┘
+```
+
+### 关键模块
+
+- **`PaperMLLayout`**：把 PaperML source 切成布局 block（kind + startLine/endLine + indexInKind + 行级 progress），光标行二分查表落到对应 block。`@figure` / `@table` / `@equation` 用 brace-depth 配对算真实 endLine（紧跟的 paragraph 段不会被吞进 brace 块）。
+- **`EditorSplitViewController`**：监听 `NSTextView.didChangeSelectionNotification` → 50ms debounce → 算 anchor → 通过 `paperLinkFollowCursorAnchor` 通知 broadcast。
+- **`AnchorProvider` 单例**：桥接 Editor ↔ Preview，因为 `HTMLPreview` 是 `NSViewRepresentable`，SwiftUI 不感知 reference-type 变化，所以 Editor 端写 `AnchorProvider.shared.current`，Preview 端的 `Coordinator` 直接观察 `paperLinkFollowCursorAnchor` 通知并立刻 `evaluateJavaScript`（绕过 SwiftUI 的 diff）。
+- **`HTMLPreview` userScript**：在 `atDocumentStart` 注入 `window.scrollToBlock(kind, index, progress)`，内部用 `[data-block-kind][data-block-index]` 选节点、`getBoundingClientRect()` 算真实渲染 y；挂 `MutationObserver` + `ResizeObserver` + `load` 事件做延迟 reapply（KaTeX 异步渲染后高度变化时重滚）。
+
+### 微抖动处理
+
+- **行级 progress**：anchor 在 block 内按 `line - startLine / endLine - startLine` 算进度，preview 端用 `rect.top + progress * rect.height` 算目标 y，避免 1 个 block 多行时一直停在同一位置。
+- **50px 死区**：`Math.abs(delta) < 50` 直接 `return true`（不滚），避免相邻行（小间距 block 间切换）时的视觉抖动。
+- **空行 fallback**：光标行不在任何 block 内时 fallback 到"前一个 block 末尾"（progress=1），而非 `blocks.last`（避免预览滚到底）。
+
+### 索引对齐
+
+PaperMLLayout 和 HTMLRenderer **各自独立数** paragraph / table / figure 的 indexInKind，必须严格对齐：
+
+- 顶层 `paragraph` block 不能数到 `@title{...}` 内部的内容（L2 / L30 / L36 等）
+- `@table` / `@figure` 的 endLine 必须用 brace-depth 配对，不能用"下一个 top-level header"（否则 L115 paragraph 会被吞进 L103-L117 的 table 块）
+- `@title` / `@author` / `@footnote` 嵌套 brace 让 `blockEndByNextHeader` 仍然适用
+
+### 可观测性
+
+开启「跟随光标」后控制台会持续打两行日志（生产可保留）：
+
+```
+[FollowCursor] line=119 → anchor kind=paragraph index=10 progress=0.0
+[FollowCursor/JS] {"ok":true,"target":"paragraph","index":10,"progress":0,"scrollY":3408,"scrollHeight":4980,"viewportH":855,"blockCount":14}
+```
+
+
 
 ## Open Recent
 
@@ -200,8 +261,9 @@ PaperLink-swiftui/
         ├── PaperCore/
         │   ├── PaperMLAST.swift         # AST 节点定义
         │   ├── PaperMLParser.swift      # 纯 Swift 解析器（parseWithErrors 报错）
+        │   ├── PaperMLLayout.swift      # Sprint 9：source → [Block] + anchor(atLine:) + 缓存
         │   ├── ParseError.swift         # ParseError + ParseResult + String.offset→line/col
-        │   └── HTMLRenderer.swift       # AST → HTML + KaTeX CDN + modern CSS
+        │   └── HTMLRenderer.swift       # AST → HTML + KaTeX CDN + modern CSS + data-block-* 锚点
         ├── Editor/
         │   ├── EditorSplitViewController.swift  # NSSplitViewController + 比例持久化（NSHostingController 包装 SwiftUI）
         │   ├── LineNumberedEditor.swift # NSTextView 包装 + GutterView 行号 + 多色高亮 + 自动闭合 + ⌘F 查找

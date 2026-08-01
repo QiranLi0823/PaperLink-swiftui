@@ -25,4 +25,6 @@ Packages/
 
 # PaperLink preview HTML（build 时生成，写到 .pml 同目录）
 .paperlink-preview.html
+.paperlink-preview-*.html
 PaperLink/PaperLink/Resources/.paperlink-preview.html
+PaperLink/PaperLink/Resources/.paperlink-preview-*.html

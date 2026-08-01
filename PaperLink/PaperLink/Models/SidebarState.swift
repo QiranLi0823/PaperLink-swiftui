@@ -26,6 +26,9 @@ final class SidebarState: ObservableObject {
     /// 当前 sidebar 模式。nil = sidebar 收起
     @Published var activeMode: SidebarView.Mode? = .project
 
+    /// Sprint 9：跟随光标模式（开 → 编辑器选区变化时，preview 同步滚动到对应位置）
+    @Published var followCursorMode: Bool = false
+
     /// sidebar 是否可见（= activeMode != nil）
     var isVisible: Bool { activeMode != nil }
 

@@ -164,12 +164,89 @@ struct ContentView: View {
 /// rootURL 决定图片所在的目录：
 ///   - fileURL != nil → rootURL = fileURL 所在目录（图片走同目录 figures/）
 ///   - fileURL == nil → rootURL = Bundle.main.resourceURL（demo 图走 bundle 内 figures/）
+import SwiftUI
+import WebKit
+
 struct HTMLPreview: NSViewRepresentable {
     let html: String
     let fileURL: URL?
+    /// Sprint 9：跟随光标模式开关。
+    let followCursorMode: Bool
+    /// Sprint 9.12：anchor 共享 channel（单例引用类型）。updateNSView 每次都读取最新值。
+    let anchorProvider: () -> BlockAnchor?
 
     func makeNSView(context: Context) -> WKWebView {
-        WKWebView(frame: .zero)
+        let config = WKWebViewConfiguration()
+        // Sprint 9.5：注入 scrollToFraction；Sprint 9.7：scrollToBlock 用真实 DOM 锚点
+        let script = """
+        (function() {
+            var lastKind = null, lastIndex = -1, lastProgress = 0;
+
+            function applyFraction(f) {
+                try {
+                    var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+                    var target = f * document.documentElement.scrollHeight - window.innerHeight / 2;
+                    if (target < 0) target = 0;
+                    if (target > max) target = max;
+                    window.scrollTo(0, target);
+                } catch (e) {}
+            }
+            function applyBlock(kind, index, progress) {
+                try {
+                    var sel = '[data-block-kind="' + kind + '"][data-block-index="' + index + '"]';
+                    var el = document.querySelector(sel);
+                    if (!el) return false;
+                    var rect = el.getBoundingClientRect();
+                    if (rect.height === 0) {
+                        try { el.scrollIntoView({block: 'center'}); return true; } catch(e) {}
+                        return false;
+                    }
+                    var docTop = rect.top + window.scrollY;
+                    var targetY = docTop + progress * rect.height - window.innerHeight / 2;
+                    var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+                    if (targetY < 0) targetY = 0;
+                    if (targetY > max) targetY = max;
+                    var delta = targetY - window.scrollY;
+                    // 50px 死区：用户在小间距块间切换时屏蔽视觉抖动
+                    if (Math.abs(delta) < 50) return true;
+                    window.scrollTo(0, targetY);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }
+            function reapply() {
+                if (lastKind == null) return;
+                applyBlock(lastKind, lastIndex, lastProgress);
+            }
+
+            window.scrollToFraction = applyFraction;
+            window.scrollToBlock = function(kind, index, progress) {
+                lastKind = kind;
+                lastIndex = index;
+                lastProgress = progress;
+                return applyBlock(kind, index, progress);
+            };
+
+            // 图片 async decode / KaTeX async 渲染导致 DOM 节点延后出现或 height 变化，
+            // 用 MutationObserver + ResizeObserver + load 持续 reapply。
+            if (window.ResizeObserver) {
+                new ResizeObserver(reapply).observe(document.documentElement);
+            }
+            new MutationObserver(reapply).observe(document.body, { childList: true, subtree: true, attributes: true });
+            window.addEventListener('load', reapply);
+            if (document.readyState === 'complete') reapply();
+        })();
+        """
+        let userScript = WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(userScript)
+        // 把 Coordinator 同时注册为 message handler（备用通道；目前不主动用）
+        config.userContentController.add(context.coordinator, name: "paperLink")
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        context.coordinator.webView = webView
+        return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
@@ -179,33 +256,145 @@ struct HTMLPreview: NSViewRepresentable {
         } else {
             rootURL = Bundle.main.resourceURL ?? URL(fileURLWithPath: NSTemporaryDirectory())
         }
-        print("[HTMLPreview] rootURL=\(rootURL.path), html length=\(html.count)")
 
-        // 幂等：html/rootURL 都没变就跳过
+        // 幂等：html/rootURL 都没变就跳过文件写入；但 anchor channel 变了 → 立刻 evaluate
         let key = "\(html.hashValue)-\(rootURL.path)"
-        guard context.coordinator.lastKey != key else { return }
-        context.coordinator.lastKey = key
+        let htmlChanged = (context.coordinator.lastKey != key)
+        if htmlChanged {
+            context.coordinator.lastKey = key
+            let previewFile = rootURL.appendingPathComponent(".paperlink-preview-\(html.hashValue).html")
+            do {
+                try html.write(to: previewFile, atomically: true, encoding: .utf8)
+                webView.loadFileURL(previewFile, allowingReadAccessTo: rootURL)
+            } catch {
+                print("[HTMLPreview] write failed: \(error) -> fallback loadHTMLString")
+                webView.loadHTMLString(html, baseURL: rootURL)
+            }
+        }
 
-        // 把 HTML 写到 rootURL 内：保证 WKWebView sandbox 允许 + 相对路径解析正确
-        let previewFile = rootURL.appendingPathComponent(".paperlink-preview-\(html.hashValue).html")
-        do {
-            try html.write(to: previewFile, atomically: true, encoding: .utf8)
-            webView.loadFileURL(previewFile, allowingReadAccessTo: rootURL)
-        } catch {
-            // rootURL 只读（Xcode bundle / 某些 sandbox 场景）→ fallback
-            // loadHTMLString + baseURL 在 macOS WKWebView 上不能读 file:// 资源，
-            // 但至少能让用户看到 HTML 骨架（图的 alt 文字、CSS 样式）。
-            print("[HTMLPreview] write failed: \(error) -> fallback loadHTMLString")
-            webView.loadHTMLString(html, baseURL: rootURL)
+        // Sprint 9.12：从共享 channel 读取最新 anchor（每次 updateNSView 都查）。
+        // 简化：去掉 lastAnchor 缓存（避免 stale 状态），每次 html 加载完成或 anchor 更新都 evaluate。
+        if followCursorMode, let a = anchorProvider() {
+            context.coordinator.lastAnchor = a
+            // escape kind（JS 字符串字面量安全）
+            let kindJS = a.kind
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            let js = """
+            (function() {
+                var ok = window.scrollToBlock('\(kindJS)', \(a.index), \(Double(a.progress)));
+                var info = {
+                    ok: ok,
+                    target: '\(kindJS)',
+                    index: \(a.index),
+                    progress: \(Double(a.progress)),
+                    scrollY: window.scrollY,
+                    scrollHeight: document.documentElement.scrollHeight,
+                    viewportH: window.innerHeight,
+                    blockCount: document.querySelectorAll('[data-block-kind="\(kindJS)"]').length
+                };
+                console.log('[FollowCursor]', JSON.stringify(info));
+                return JSON.stringify(info);
+            })();
+            """
+            webView.evaluateJavaScript(js) { result, error in
+                if let resultStr = result as? String {
+                    print("[FollowCursor/JS] \(resultStr)")
+                }
+                if let error = error {
+                    print("[FollowCursor/JS] error: \(error)")
+                }
+            }
         }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        // Sprint 9.12：Coordinator 直接监听 paperLinkFollowCursorAnchor，
+        // 避免 SwiftUI 不感知 AnchorProvider 变化导致 updateNSView 不触发。
+        let coord = Coordinator()
+        NotificationCenter.default.addObserver(
+            coord,
+            selector: #selector(Coordinator.onFollowCursorAnchor(_:)),
+            name: .paperLinkFollowCursorAnchor,
+            object: nil
+        )
+        return coord
     }
 
-    final class Coordinator {
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        // 防止 leak：把 userContentController 上注册的 handler / script 清掉
+        webView.configuration.userContentController.removeAllUserScripts()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "paperLink")
+        NotificationCenter.default.removeObserver(coordinator)
+    }
+
+    /// Sprint 9.7：Coordinator 仅承担 WKScriptMessageHandler / WKNavigationDelegate 角色。
+    /// Sprint 9.12：Coordinator 直接监听 `paperLinkFollowCursorAnchor` 通知，
+    /// 缓存到 self.pendingAnchor，并在 didFinish / updateNSView 触发 evaluate。
+    /// 这是因为 SwiftUI 不感知 AnchorProvider 引用变化，必须显式 push。
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var lastKey: String?
+        var lastAnchor: BlockAnchor?
+        var pendingAnchor: BlockAnchor?
+        weak var webView: WKWebView?
+
+        @MainActor
+        @objc func onFollowCursorAnchor(_ note: Notification) {
+            guard let userInfo = note.userInfo,
+                  let kind = userInfo["kind"] as? String,
+                  let index = userInfo["index"] as? Int,
+                  let progress = userInfo["progress"] as? Double else { return }
+            let a = BlockAnchor(kind: kind, index: index, progress: CGFloat(progress))
+            pendingAnchor = a
+            // 立即 evaluate（不等 updateNSView，避免 SwiftUI 不刷新）
+            if let wv = webView {
+                evaluateJS(on: wv, anchor: a)
+            }
+        }
+
+        @MainActor
+        private func evaluateJS(on webView: WKWebView, anchor: BlockAnchor) {
+            let kindJS = anchor.kind
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            let js = """
+            (function() {
+                var ok = window.scrollToBlock('\(kindJS)', \(anchor.index), \(Double(anchor.progress)));
+                var info = {
+                    ok: ok,
+                    target: '\(kindJS)',
+                    index: \(anchor.index),
+                    progress: \(Double(anchor.progress)),
+                    scrollY: window.scrollY,
+                    scrollHeight: document.documentElement.scrollHeight,
+                    viewportH: window.innerHeight,
+                    blockCount: document.querySelectorAll('[data-block-kind="\(kindJS)"]').length
+                };
+                console.log('[FollowCursor]', JSON.stringify(info));
+                return JSON.stringify(info);
+            })();
+            """
+            webView.evaluateJavaScript(js) { result, error in
+                if let resultStr = result as? String {
+                    print("[FollowCursor/JS] \(resultStr)")
+                }
+                if let error = error {
+                    print("[FollowCursor/JS] error: \(error)")
+                }
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController,
+                                   didReceive message: WKScriptMessage) {
+            // 备用通道：JS 主动发消息到 Swift。当前未使用。
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // 加载完成：用 pendingAnchor 重试（不依赖 lastAnchor 比较）
+            if let a = pendingAnchor {
+                evaluateJS(on: webView, anchor: a)
+            }
+        }
     }
 }
 

@@ -358,6 +358,9 @@ struct LineNumberedEditor: NSViewRepresentable {
         }
 
         /// Sprint 8.3：选区变化 → 计算当前行，更新 gutter 高亮
+        /// Sprint 9.2：同时算光标在文档中的纵向 fraction（用 layoutManager 像素 y / 总像素高），
+        /// 50ms debounce post 给 HTMLPreview 做滚动同步
+        private var fractionDebounce: Timer?
         @objc func selectionChanged() {
             guard let tv = textView, let g = gutter else { return }
             let nsText = tv.string as NSString
@@ -373,6 +376,86 @@ struct LineNumberedEditor: NSViewRepresentable {
             }
             g.currentLine = line
             g.setNeedsDisplay(g.bounds)
+
+            // Sprint 9.2：fraction = 光标所在字符的 y / 文档总 y（layoutManager 坐标系）
+            scheduleFractionPost()
+        }
+
+        private func scheduleFractionPost() {
+            fractionDebounce?.invalidate()
+            fractionDebounce = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    self?.postFollowCursorFraction()
+                }
+            }
+        }
+
+        private func postFollowCursorFraction() {
+            guard let tv = textView else { return }
+            // Sprint 9.7：editor → preview 通过 (kind, index, progress) 锚点对齐，
+            // preview 端用真实 DOM getBoundingClientRect() 拿高度（避免预估不准）。
+            let nsText = tv.string as NSString
+            let cursor = tv.selectedRange.location
+            let cursorLine = lineNumber(at: cursor, in: nsText)
+            let blocks = PaperMLLayout.cachedLayout(for: tv.string)
+            if let anchor = PaperMLLayout.anchor(atLine: cursorLine, blocks: blocks) {
+                print("[FollowCursor] line=\(cursorLine) → anchor kind=\(anchor.kind) index=\(anchor.index) progress=\(anchor.progress)")
+                NotificationCenter.default.post(
+                    name: .paperLinkFollowCursorAnchor,
+                    object: nil,
+                    userInfo: [
+                        "kind": anchor.kind,
+                        "index": anchor.index,
+                        "progress": Double(anchor.progress)
+                    ]
+                )
+            } else {
+                print("[FollowCursor] line=\(cursorLine) → no anchor (blocks.count=\(blocks.count))")
+            }
+
+            // Sprint 9：跟随光标模式 → editor 自身把光标行滚到视窗中央
+            // （点击 gutter、键盘跳行、普通移动光标都会触发 selectionChanged）
+            if let layoutManager = tv.layoutManager,
+               let textContainer = tv.textContainer {
+                let totalHeight = layoutManager.usedRect(for: textContainer).height
+                if totalHeight > 0 {
+                    let charRange = NSRange(location: min(cursor, (tv.string as NSString).length), length: 0)
+                    let glyphRange = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+                    let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil, withoutAdditionalLayout: true)
+                    let followMode = MainActor.assumeIsolated { SidebarState.shared.followCursorMode }
+                    if followMode {
+                        scrollEditorToCenter(lineRect: lineRect, totalHeight: totalHeight, in: tv)
+                    }
+                }
+            }
+        }
+
+        /// 给定字符 offset，返回 1-based 行号（独立函数，避免和 selectionChanged 内的循环重复）
+        private func lineNumber(at charIndex: Int, in nsText: NSString) -> Int {
+            var line = 1
+            let scanEnd = min(charIndex, nsText.length)
+            for i in 0..<scanEnd {
+                if nsText.character(at: i) == UInt16(UnicodeScalar("\n").value) {
+                    line += 1
+                }
+            }
+            return line
+        }
+
+        /// Sprint 9：把光标行滚到 textView 视窗纵向中央
+        private func scrollEditorToCenter(lineRect: NSRect, totalHeight: CGFloat, in textView: NSTextView) {
+            let visible = textView.visibleRect
+            let viewportH = visible.height
+            let lineMidY = lineRect.origin.y + lineRect.height / 2
+            var newY = lineMidY - viewportH / 2
+            let maxY = max(0, totalHeight - viewportH)
+            if newY < 0 { newY = 0 }
+            if newY > maxY { newY = maxY }
+            let cur = textView.enclosingScrollView?.documentVisibleRect.origin ?? visible.origin
+            let desired = NSPoint(x: cur.x, y: newY)
+            // 已经在目标位置附近就跳过，避免抖动
+            if abs(desired.y - cur.y) < 2 { return }
+            textView.scroll(desired)
         }
 
         /// Sprint 8.1 多色语法高亮：
@@ -452,7 +535,8 @@ struct LineNumberedEditor: NSViewRepresentable {
 // MARK: - 顶层静态方法
 
 extension LineNumberedEditor {
-    /// Sprint 8.3：跳到指定行（行号 1-based），gutter 点击时调用
+    /// Sprint 8.3：跳到指定行（行号 1-based），gutter 点击时调用。
+    /// Sprint 9：当 sidebarState.followCursorMode 开启时，把目标行滚到 editor 视窗中央。
     static func jumpToLine(_ line: Int, in textView: NSTextView) {
         let nsText = textView.string as NSString
         var current = 1
@@ -469,7 +553,42 @@ extension LineNumberedEditor {
             endIdx += 1
         }
         textView.setSelectedRange(NSRange(location: target, length: endIdx - target))
-        textView.scrollRangeToVisible(NSRange(location: target, length: 0))
+
+        // Sprint 9：跟随光标模式 → 把目标行滚到视窗中央；否则保持"滚到可见"
+        let followMode = MainActor.assumeIsolated { SidebarState.shared.followCursorMode }
+        if followMode {
+            scrollLineToCenter(line: line, charIndex: target, in: textView)
+        } else {
+            textView.scrollRangeToVisible(NSRange(location: target, length: 0))
+        }
+    }
+
+    /// Sprint 9：把指定字符位置所在行滚动到 textView 视窗纵向中央
+    private static func scrollLineToCenter(line: Int, charIndex: Int, in textView: NSTextView) {
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return }
+        let used = layoutManager.usedRect(for: textContainer)
+        guard used.height > 0 else { return }
+
+        // 取目标字符的 line fragment rect
+        let charRange = NSRange(location: min(charIndex, (textView.string as NSString).length), length: 0)
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+        let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location,
+                                                       effectiveRange: nil,
+                                                       withoutAdditionalLayout: true)
+        let lineMidY = lineRect.origin.y + lineRect.height / 2
+        let visible = textView.visibleRect
+        let viewportH = visible.height
+        // 让该行中点落在视窗中央：newOrigin.y = lineMidY - viewportH/2
+        var newY = lineMidY - viewportH / 2
+        let maxY = max(0, used.height - viewportH)
+        if newY < 0 { newY = 0 }
+        if newY > maxY { newY = maxY }
+
+        // 当前 origin.x 保持
+        let cur = textView.enclosingScrollView?.documentVisibleRect.origin ?? visible.origin
+        let newOrigin = NSPoint(x: cur.x, y: newY)
+        textView.scroll(newOrigin)
     }
 }
 

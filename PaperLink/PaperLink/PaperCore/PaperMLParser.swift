@@ -532,6 +532,11 @@ enum PaperMLParser {
             let p = String(para).trimmingCharacters(in: .whitespacesAndNewlines)
             if p.isEmpty { continue }
 
+            // Sprint 9.x：section body 内的 "@subsection Title" 行交给顶层 splitTopLevel
+            // 处理为独立 subsection block；这里不能再当 paragraph，否则会渲染成垃圾段落
+            // 且导致 Sprint 9 paragraph 锚点偏移。
+            if p.hasPrefix("@subsection") { continue }
+
             if p.hasPrefix("@figure") {
                 if let fig = parseFigure(p) { blocks.append(.figure(fig)) }
             } else if p.hasPrefix("@table") {

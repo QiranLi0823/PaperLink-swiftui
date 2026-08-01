@@ -83,6 +83,23 @@ final class EditorSplitViewController: NSSplitViewController {
             name: NSSplitView.didResizeSubviewsNotification,
             object: splitView
         )
+
+        // Sprint 9.12：将 editor 发出的 anchor 通知写入 AnchorProvider 单例，
+        // HTMLPreview.updateNSView 轮询最新值（避免 @State 链路丢值）。
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(onFollowCursorAnchor(_:)),
+            name: .paperLinkFollowCursorAnchor,
+            object: nil
+        )
+    }
+
+    @objc private func onFollowCursorAnchor(_ note: Notification) {
+        guard SidebarState.shared.followCursorMode,
+              let kind = note.userInfo?["kind"] as? String,
+              let index = note.userInfo?["index"] as? Int,
+              let progress = note.userInfo?["progress"] as? Double else { return }
+        AnchorProvider.shared.current = BlockAnchor(kind: kind, index: index, progress: CGFloat(progress))
     }
 
     override func viewDidLayout() {
@@ -176,17 +193,43 @@ final class PreviewPaneVC: NSViewController {
     }
 }
 
-/// PreviewPane 的 SwiftUI 内容，订阅 document 自动重渲
+/// PreviewPane 的 SwiftUI 内容，订阅 document 自动重渲；
+/// Sprint 9.12：移除 onReceive 链路，改由 Coordinator 自己监听 NotificationCenter 直接转发到 JS，
+/// 避免 @State 在 document 变化时 body 重算导致的 stale state 问题。
 private struct PreviewPaneContent: View {
     @ObservedObject var document: PaperDocument
+    @ObservedObject private var sidebarState = SidebarState.shared
 
     var body: some View {
         HTMLPreview(
             html: document.html,
-            fileURL: document.fileURL
+            fileURL: document.fileURL,
+            followCursorMode: sidebarState.followCursorMode,
+            anchorProvider: { AnchorProvider.shared.current }
         )
         .padding(8)
+        .onChange(of: sidebarState.followCursorMode) { newValue in
+            if !newValue {
+                AnchorProvider.shared.current = nil
+            }
+        }
     }
+}
+
+/// Sprint 9.12：跨 SwiftUI/HtmlPreview 边界的 anchor 共享 channel。
+/// Coordinator 监听 `paperLinkFollowCursorAnchor` 写入这里；HTMLPreview.updateNSView 读取最新值。
+/// 用单例 + 引用类型，避免 `@State` 在 body 重算时丢值。
+final class AnchorProvider {
+    static let shared = AnchorProvider()
+    var current: BlockAnchor?
+    private init() {}
+}
+
+/// Sprint 9.7：editor → preview 锚点（kind + index + 块内进度）
+struct BlockAnchor: Equatable {
+    let kind: String
+    let index: Int
+    let progress: CGFloat
 }
 
 // MARK: - SwiftUI Wrapper

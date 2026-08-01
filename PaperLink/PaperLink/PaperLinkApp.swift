@@ -25,7 +25,7 @@ struct PaperLinkApp: App {
                 .toolbar {
                     // sidebar 模式按钮：原生 Picker + segmented 样式（macOS 26 Liquid Glass）
                     ToolbarItemGroup(placement: .navigation) {
-                        SidebarModeBar(activeMode: $sidebarState.activeMode)
+                        SidebarModeBar(activeMode: $sidebarState.activeMode, sidebarState: sidebarState)
                     }
                 }
                 .onAppear {
@@ -126,11 +126,19 @@ extension FocusedValues {
 ///   - 当前收起 → 展开
 struct SidebarModeBar: View {
     @Binding var activeMode: SidebarView.Mode?
+    @ObservedObject var sidebarState: SidebarState
 
     var body: some View {
         HStack(spacing: 0) {
             segment(.project)
             segment(.figures)
+            // 分隔
+            Rectangle()
+                .fill(Color.secondary.opacity(0.25))
+                .frame(width: 0.5, height: 14)
+                .padding(.horizontal, 4)
+            // Sprint 9：跟随光标 toggle（独立按钮，复用 segment 视觉）
+            followCursorButton
         }
     }
 
@@ -146,11 +154,9 @@ struct SidebarModeBar: View {
             }
         } label: {
             ZStack {
-                // 选中态蓝色底（正圆 22pt，独立于按钮 hit area）
                 Circle()
                     .fill(isActive ? Color.accentColor.opacity(0.18) : Color.clear)
                     .frame(width: 22, height: 22)
-                // icon（按钮 hit area 是 32×22 椭圆）
                 Image(systemName: mode.icon)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
@@ -160,6 +166,29 @@ struct SidebarModeBar: View {
         }
         .buttonStyle(.plain)
         .help(mode == .project ? "项目文件树" : "图片列表")
+    }
+
+    @ViewBuilder
+    private var followCursorButton: some View {
+        let active = sidebarState.followCursorMode
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                sidebarState.followCursorMode.toggle()
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(active ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .frame(width: 22, height: 22)
+                Image(systemName: "arrow.left.arrow.right.square")
+                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                    .foregroundStyle(active ? Color.accentColor : Color.secondary)
+            }
+            .frame(width: 32, height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("跟随光标（编辑器与预览同步滚动）")
     }
 }
 
@@ -171,4 +200,8 @@ extension Notification.Name {
     static let paperLinkFindGotoMatch    = Notification.Name("PaperLink.findGotoMatch")
     static let paperLinkFindMatchCount   = Notification.Name("PaperLink.findMatchCount")
     static let paperLinkFindCurrentIndex = Notification.Name("PaperLink.findCurrentIndex")
+    // Sprint 9 跟随光标
+    static let paperLinkFollowCursorFraction = Notification.Name("PaperLink.followCursorFraction")
+    // Sprint 9.7：editor → preview 用真实 DOM 锚点 (kind, index, progress)
+    static let paperLinkFollowCursorAnchor = Notification.Name("PaperLink.followCursorAnchor")
 }

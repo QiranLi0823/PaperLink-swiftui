@@ -74,10 +74,11 @@ final class PreviewFileCleaner {
     @discardableResult
     func sweepOrphans(in directory: URL) -> Int {
         let fm = FileManager.default
+        // 不带 .skipsHiddenFiles：preview 文件名以 . 开头（隐藏文件），要包含进来
         guard let entries = try? fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles.reversed]   // 包含隐藏文件（这些 preview 文件以 . 开头）
+            options: []
         ) else { return 0 }
 
         var removed = 0

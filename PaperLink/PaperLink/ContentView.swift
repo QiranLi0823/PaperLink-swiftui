@@ -51,7 +51,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 1100, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle("PaperLink")
+        .navigationTitle(windowTitle)
         .onReceive(NotificationCenter.default.publisher(for: .paperLinkStartRename)) { _ in
             startRename()
         }
@@ -65,6 +65,13 @@ struct ContentView: View {
 
     private var currentFileName: String {
         document.fileURL?.lastPathComponent ?? "Untitled.pml"
+    }
+
+    /// 窗口标题：未保存时加 `*` 标记
+    /// 例：`demo.pml*` / `demo.pml` / `Untitled.pml*`
+    private var windowTitle: String {
+        let name = currentFileName
+        return document.isDirty ? "\(name)*" : name
     }
 
     @ViewBuilder

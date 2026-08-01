@@ -11,6 +11,7 @@ import SwiftUI
 struct PaperLinkApp: App {
     @StateObject private var document = PaperDocument()
     @StateObject private var sidebarState = SidebarState.shared
+    @State private var closeGuard: WindowCloseGuard?
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,12 @@ struct PaperLinkApp: App {
                     // sidebar 模式按钮：原生 Picker + segmented 样式（macOS 26 Liquid Glass）
                     ToolbarItemGroup(placement: .navigation) {
                         SidebarModeBar(activeMode: $sidebarState.activeMode)
+                    }
+                }
+                .onAppear {
+                    // 窗口首次出现时挂关闭守卫（未保存时弹确认对话框）
+                    if closeGuard == nil, let window = NSApp.windows.first(where: { $0.isVisible }) {
+                        closeGuard = WindowCloseGuard(document: document, window: window)
                     }
                 }
         }

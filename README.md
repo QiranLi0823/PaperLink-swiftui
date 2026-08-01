@@ -4,16 +4,16 @@ macOS SwiftUI 论文编辑器。
 
 ## 当前状态
 
-启动时加载**上次打开的 PaperML 文件**（若无则加载 `Resources/demo.pml`），左侧 editor，右侧 WKWebView 实时渲染为论文样式 HTML。窗口左侧可选 **sidebar**（项目文件树 / 图片列表），用标题栏的 segmented Picker 切换模式，再点同一个按钮收起。
+启动时加载**上次打开的 PaperML 文件**（若无则加载 `Resources/demo.pml`），左侧 editor，右侧 WKWebView 实时渲染为论文样式 HTML。窗口左侧可选 **sidebar**（项目文件树 / 图片列表），用标题栏的两个 icon 按钮切换模式，再点同一个按钮收起。
 
-支持 Open / Save / Save As / Rename（⌘O / ⌘S / ⌘⇧S / ⌘R）。左侧编辑器带**行号 + 错误行红底高亮**，底部状态栏显示解析错误数量。
+支持 Open / Save / Save As / Rename（⌘O / ⌘S / ⌘⇧S / ⌘R）。左侧编辑器带**行号 + 错误行红底高亮**，底部状态栏显示解析错误数量。窗口标题显示当前文件名，脏状态时附加 `*` 标记；关闭未保存的文件会弹"是否保存"对话框。
 
 ## 布局
 
-- **三栏**：sidebar（220pt，可隐藏）+ editor（minWidth 380）+ preview（minWidth 380）
+- **三栏**：sidebar（条件渲染，可隐藏）+ editor（minWidth 380）+ preview（minWidth 380）
 - **editor / preview 1:1**：HSplitView 对称 minWidth，初始等宽
 - **sidebar 切换**：标题栏两个 icon 按钮（📁 项目 / 🖼 图片），再点同一项收起整个 sidebar
-- **窗口标题**：固定显示 "PaperLink"（不再显示当前文件名）
+- **窗口标题**：当前文件名 + `*`（未保存）；未打开文件时显示 `Untitled.pml`
 
 ## Sidebar 状态机
 
@@ -101,6 +101,17 @@ macOS SwiftUI 论文编辑器。
 - **重命名**：⌘R 触发同目录下重命名（移动文件 + 更新持久化路径）
 - **现代 CSS**：HTMLRenderer 使用 CSS variables，自动适配 light/dark mode；body `max-width: 100%` + `overflow-x: hidden` 防止 WKWebView 在窄容器内横向溢出
 
+## 文件类型关联
+
+注册了自定义 UTI `com.paperlink.pml`（conforms to `public.plain-text` / `public.text`）：
+
+- **扩展名**：`.pml`
+- **MIME**：`text/x-paperml`
+- **角色**：Editor（rank=Owner）
+- **配置位置**：`PaperLink/PaperLink/Info.plist`（`UTExportedTypeDeclarations` + `CFBundleDocumentTypes`），通过 `INFOPLIST_FILE` build setting 关联，关闭 Xcode 自动生成
+
+Finder 右键 `.pml` 文件 → "Open With" 应出现 PaperLink；双击会启动并加载文件。
+
 ## 不做什么（明确边界）
 
 - ❌ 不接 Rust 引擎（纯 Swift 解析）
@@ -131,12 +142,14 @@ PaperLink-swiftui/
 │   └── ROADMAP.md                       # 阶段性规划
 └── PaperLink/
     └── PaperLink/
-        ├── PaperLinkApp.swift           # @main 入口 + File 菜单 + sidebar toolbar
-        ├── ContentView.swift            # 三栏布局（HStack sidebar + HSplitView editor/preview）
+        ├── PaperLinkApp.swift           # @main 入口 + File 菜单 + sidebar toolbar + WindowCloseGuard
+        ├── ContentView.swift            # 三栏布局（HStack sidebar + HSplitView editor/preview）+ 标题栏 *
+        ├── Info.plist                   # 自定义 plist：UTI 注册 + CFBundleDocumentTypes
         ├── Assets.xcassets/
         ├── Models/
         │   ├── PaperDocument.swift      # @MainActor + Combine debounce + 文件 I/O
-        │   └── SidebarState.swift       # sidebar 全局状态（isVisible / activeMode）
+        │   ├── SidebarState.swift       # sidebar 全局状态（activeMode: Mode? 单一状态）
+        │   └── WindowCloseGuard.swift   # NSWindow.willCloseNotification → "是否保存"对话框
         ├── PaperCore/
         │   ├── PaperMLAST.swift         # AST 节点定义
         │   ├── PaperMLParser.swift      # 纯 Swift 解析器（parseWithErrors 报错）

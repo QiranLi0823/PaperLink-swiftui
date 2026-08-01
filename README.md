@@ -33,6 +33,10 @@ File 菜单下新增 **Settings…**（⌘,），弹出 macOS 玻璃感卡片：
 
 ## 支持的 PaperML 语法
 
+完整语法参考见 [`grammar/`](./grammar/)：顶层块见 [top-level.md](./grammar/top-level.md)，块级元素见 [blocks.md](./grammar/blocks.md)，行内元素见 [inline.md](./grammar/inline.md)。
+
+下面是常用语法速览：
+
 ```
 @title{
   @title = "..."

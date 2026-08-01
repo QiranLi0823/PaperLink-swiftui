@@ -105,6 +105,14 @@ struct LineNumberedEditor: NSViewRepresentable {
             object: textView
         )
 
+        // Sprint 9.16：跟随光标 off → on 时主动触发一次（不等下一次 selectionChanged）
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.followCursorEnabled),
+            name: .paperLinkFollowCursorEnabled,
+            object: nil
+        )
+
         // Sprint 8.3：gutter 行号点击 → textView 跳到该行
         gutter.onClickLine = { [weak textView] line in
             guard let tv = textView else { return }
@@ -379,6 +387,16 @@ struct LineNumberedEditor: NSViewRepresentable {
 
             // Sprint 9.2：fraction = 光标所在字符的 y / 文档总 y（layoutManager 坐标系）
             scheduleFractionPost()
+        }
+
+        /// Sprint 9.16：跟随光标 off → on 主动触发一次。
+        /// 直接调 postFollowCursorFraction 复用现有 anchor 算 + notify 路径
+        /// （不绕 50ms debounce，开关瞬间就要滚）。
+        @objc func followCursorEnabled() {
+            guard MainActor.assumeIsolated({ SidebarState.shared.followCursorMode }) else { return }
+            fractionDebounce?.invalidate()
+            fractionDebounce = nil
+            postFollowCursorFraction()
         }
 
         private func scheduleFractionPost() {

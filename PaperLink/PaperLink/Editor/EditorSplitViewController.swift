@@ -209,7 +209,11 @@ private struct PreviewPaneContent: View {
         )
         .padding(8)
         .onChange(of: sidebarState.followCursorMode) { newValue in
-            if !newValue {
+            if newValue {
+                // Sprint 9.16：off → on 主动触发一次滚动（不等下一次 selectionChanged）。
+                // Editor 端响应后用当前光标行算 anchor 并 post 通知。
+                NotificationCenter.default.post(name: .paperLinkFollowCursorEnabled, object: nil)
+            } else {
                 AnchorProvider.shared.current = nil
             }
         }

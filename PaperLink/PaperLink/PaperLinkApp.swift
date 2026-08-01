@@ -204,4 +204,7 @@ extension Notification.Name {
     static let paperLinkFollowCursorFraction = Notification.Name("PaperLink.followCursorFraction")
     // Sprint 9.7：editor → preview 用真实 DOM 锚点 (kind, index, progress)
     static let paperLinkFollowCursorAnchor = Notification.Name("PaperLink.followCursorAnchor")
+    // Sprint 9.16：跟随光标开关 off → on 时，PreviewPaneContent 发出此通知，
+    // Editor 端收到后用当前光标行主动算一次 anchor，让 preview 立即滚动
+    static let paperLinkFollowCursorEnabled = Notification.Name("PaperLink.followCursorEnabled")
 }

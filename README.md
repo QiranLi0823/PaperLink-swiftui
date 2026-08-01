@@ -86,11 +86,15 @@ macOS SwiftUI 论文编辑器。
 - Abstract 圆角背景框 + keywords
 - 一级 / 二级章节嵌套（subsection 缩进嵌入父 section）
 - 段落两端对齐，行内 `@cite` 蓝色角标
-- `@figure` 真图渲染（图放 `PaperLink/Resources/figures/`）
+- `@figure` 真图渲染——**图片根目录 = 当前 .pml 所在目录**：
+  - 用户文档：`~/Documents/papers/demo2.pml` 同目录下的 `figures/` 子目录（图路径 `figures/x.png`）
+  - bundle 内 demo：`Bundle/Resources/figures/`
 - `@table` 真实 HTML 表格（圆角 + 斑马头）
 - `@equation` + `$...$` 行内数学——KaTeX CDN 渲染
 - 200ms debounce 实时刷新
 - **CSS variables**：自动适配 macOS 深色模式
+- **WKWebView 加载策略**：HTML 写到 `.pml` 同目录的 `.paperlink-preview.html`，`loadFileURL` 加载。
+  关键：HTML 文件必须在 rootURL **之内**，否则 `<img src="figures/...">` 相对路径会从 HTML 自身位置（不是 rootURL）解析。
 
 ## 编辑器功能
 
@@ -99,6 +103,7 @@ macOS SwiftUI 论文编辑器。
 - **行号定位**：按 visual line 渲染——一段被软换行拆成 N 行的文字，行号只画在第一行顶部，后续视觉行只画错误底色（不重复行号）
 - **持久化**：上次打开的文件路径存到 `UserDefaults[PaperLink.lastOpenedFilePath]`
 - **重命名**：⌘R 触发同目录下重命名（移动文件 + 更新持久化路径）
+- **Finder 双击 / 命令行 `open file.pml`**：通过 `.onOpenURL` 把传入 URL 转给 `document.open(url:)`，实现文件类型关联的端到端打通
 - **现代 CSS**：HTMLRenderer 使用 CSS variables，自动适配 light/dark mode；body `max-width: 100%` + `overflow-x: hidden` 防止 WKWebView 在窄容器内横向溢出
 
 ## 文件类型关联

@@ -31,6 +31,10 @@ struct PaperLinkApp: App {
                         closeGuard = WindowCloseGuard(document: document, window: window)
                     }
                 }
+                // Finder 双击 .pml 文件 / `open file.pml` 命令行 → 加载目标文件
+                .onOpenURL { url in
+                    document.open(url: url)
+                }
         }
         .windowToolbarStyle(.unified)
         .commands {

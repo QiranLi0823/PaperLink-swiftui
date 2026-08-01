@@ -80,7 +80,9 @@ final class PaperDocument: ObservableObject {
     private func recompute(_ source: String) {
         let result = PaperMLParser.parseWithErrors(source)
         let doc = result.document ?? PaperMLDocument(metadata: .init(), sections: [])
-        let rendered = HTMLRenderer.render(doc)
+        // 用当前 .pml 文件所在目录作为图片根，让 @path = "figures/x.png" 解析到
+        // 同目录的 figures/x.png（而不是 Bundle.main）。
+        let rendered = HTMLRenderer.render(doc, rootURL: fileURL)
         self.document = doc
         self.html = rendered
         self.errors = result.errors

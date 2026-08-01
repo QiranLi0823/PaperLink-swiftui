@@ -15,7 +15,10 @@ import Foundation
 enum HTMLRenderer {
 
     /// 渲染 PaperML 文档为完整 HTML 字符串（带 inline CSS + KaTeX CDN）
-    static func render(_ doc: PaperMLDocument) -> String {
+    ///
+    /// - Parameter rootURL: 当前 .pml 文件的所在目录。`@path` 里的 `figures/xxx.png` 优先从这里解析；
+    ///                     找不到再 fallback 到 Bundle.main（开发期 demo 图）。传 nil 时只查 Bundle。
+    static func render(_ doc: PaperMLDocument, rootURL: URL? = nil) -> String {
         var html = ""
         html += "<!DOCTYPE html>\n<html><head><meta charset='utf-8'>"
         html += "<style>\(css)\n</style>"
@@ -45,24 +48,47 @@ enum HTMLRenderer {
             html += renderAbstract(abs)
         }
         for section in doc.sections {
-            html += renderSection(section)
+            html += renderSection(section, rootURL: rootURL)
         }
         html += "</body></html>"
         return html
     }
 
-    // MARK: - 公共：图路径转 file:// URL
-    // 找 Bundle 里 figures/<path>，没有就 fallback 到占位符
+    // MARK: - 公共：图路径 → 相对路径（HTML 里的 <img src>）
+    //
+    // 返回字符串永远是 **相对路径**（无 file:// 前缀），由 HTMLPreview 的 baseURL 决定根：
+    //   - 用户 .pml（fileURL != nil）→ baseURL = fileURL 所在目录 → 同目录 figures/ 自动解析
+    //   - bundle 内 demo.pml（fileURL == nil）→ baseURL = Bundle.main.resourceURL → bundle 内 figures/ 自动解析
+    //
+    // 存在性检查（用于在 HTML 中显示占位符 vs 真图）：
+    //   1. `<rootURL>/<relativePath>`（按原始相对路径拼，保留 figures/ 前缀）
+    //   2. `Bundle.main/<relativePath>`（demo 图 fallback；Bundle API 自动处理 subdirectory）
+    //
+    // 返回 nil 表示找不到，对应 HTML 显示 `[image not found]`。
 
-    private static func figureURL(_ relativePath: String) -> String? {
-        // 去掉前导 "figures/" 再拼绝对路径
-        let cleaned = relativePath.hasPrefix("figures/") ? String(relativePath.dropFirst("figures/".count)) : relativePath
-        if let bundleURL = Bundle.main.url(forResource: "figures/\(cleaned)", withExtension: nil) {
-            return bundleURL.absoluteString
+    static func figureRelativePath(_ relativePath: String, rootURL: URL?) -> String? {
+        // 1. 用户文档：按原始相对路径拼到 rootURL 所在目录
+        if let rootURL = rootURL {
+            let dir = rootURL.hasDirectoryPath ? rootURL : rootURL.deletingLastPathComponent()
+            let candidate = dir.appendingPathComponent(relativePath)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return relativePath
+            }
         }
-        if let bundleURL = Bundle.main.url(forResource: cleaned, withExtension: nil) {
-            return bundleURL.absoluteString
+
+        // 2. Bundle fallback（demo 图）。这里我们 *不* 验证文件存在，因为 bundle API
+        // 不拆 subdirectory；只要 @path 是 figures/<x> 形式，HTMLPreview 的 baseURL
+        // 是 Bundle.main.resourceURL，就一定能解析。
+        if relativePath.hasPrefix("figures/") {
+            let cleaned = String(relativePath.dropFirst("figures/".count))
+            if Bundle.main.url(forResource: cleaned, withExtension: nil, subdirectory: "figures") != nil {
+                return relativePath
+            }
         }
+        if Bundle.main.url(forResource: relativePath, withExtension: nil) != nil {
+            return relativePath
+        }
+
         return nil
     }
 
@@ -122,17 +148,17 @@ enum HTMLRenderer {
 
     // MARK: - Section
 
-    private static func renderSection(_ section: Section) -> String {
+    private static func renderSection(_ section: Section, rootURL: URL?) -> String {
         let levelClass = section.level == .section ? "section-h1" : "section-h2"
         let tag = section.level == .section ? "h2" : "h3"
         var s = "<\(tag) class='\(levelClass)'>\(escape(section.title))</\(tag)>"
         for block in section.blocks {
-            s += renderBlock(block)
+            s += renderBlock(block, rootURL: rootURL)
         }
         // 递归渲染嵌套的 subsection
         for child in section.children {
             s += "<div class='subsection-group'>"
-            s += renderSection(child)
+            s += renderSection(child, rootURL: rootURL)
             s += "</div>"
         }
         return s
@@ -140,14 +166,14 @@ enum HTMLRenderer {
 
     // MARK: - Block
 
-    private static func renderBlock(_ block: Block) -> String {
+    private static func renderBlock(_ block: Block, rootURL: URL?) -> String {
         switch block {
         case .paragraph(let inlines):
             return "<p>\(renderInlines(inlines))</p>"
         case .figure(let fig):
             var s = "<figure>"
-            if let url = figureURL(fig.path) {
-                s += "<img src='\(url)' alt='\(escape(fig.caption))' class='figure-img' />"
+            if let rel = figureRelativePath(fig.path, rootURL: rootURL) {
+                s += "<img src='\(escape(rel))' alt='\(escape(fig.caption))' class='figure-img' />"
             } else {
                 s += "<div class='figure-placeholder'>[image not found: \(escape(fig.path))]</div>"
             }

@@ -38,7 +38,7 @@ struct ContentView: View {
                         .padding(8)
                         .frame(minWidth: 380)
 
-                    HTMLPreview(html: document.html)
+                    HTMLPreview(html: document.html, fileURL: document.fileURL)
                         .padding(8)
                         .frame(minWidth: 380)
                 }
@@ -101,15 +101,61 @@ struct ContentView: View {
 
 // MARK: - WKWebView 包装
 
+/// 策略：把 HTML 写到 rootURL **之内**的临时文件 + `loadFileURL` 加载。
+///
+/// 为什么不用 `loadHTMLString`：
+///   - `loadHTMLString` 内部走 about:blank scheme，WKWebView 在 macOS 上从 about:blank
+///     加载 file:// 资源行为不一致
+///
+/// 为什么 HTML 必须写在 rootURL 内：
+///   - WKWebView 解析 `<img src="figures/x.png">` 相对路径是基于 HTML 文件自身的位置
+///   - 如果 HTML 写在 `/tmp/paperlink-preview.html`，相对路径会解析到 `/tmp/figures/...`，图就找不到
+///   - 写在 rootURL 内（比如 `~/Documents/papers/.paperlink-preview.html`），
+///     相对路径自动解析到 `~/Documents/papers/figures/x.png`
+///
+/// rootURL 决定图片所在的目录：
+///   - fileURL != nil → rootURL = fileURL 所在目录（图片走同目录 figures/）
+///   - fileURL == nil → rootURL = Bundle.main.resourceURL（demo 图走 bundle 内 figures/）
+///
+/// 临时文件名：`.paperlink-preview.html`（隐藏文件，避免污染文件列表）。
 struct HTMLPreview: NSViewRepresentable {
     let html: String
+    let fileURL: URL?
 
     func makeNSView(context: Context) -> WKWebView {
         WKWebView(frame: .zero)
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        webView.loadHTMLString(html, baseURL: Bundle.main.resourceURL)
+        let rootURL: URL
+        if let fileURL = fileURL {
+            rootURL = fileURL.hasDirectoryPath ? fileURL : fileURL.deletingLastPathComponent()
+        } else {
+            rootURL = Bundle.main.resourceURL ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        }
+
+        // 幂等：html/rootURL 都没变就跳过
+        let key = "\(html.hashValue)-\(rootURL.path)"
+        guard context.coordinator.lastKey != key else { return }
+        context.coordinator.lastKey = key
+
+        // 把 HTML 写到 rootURL 内
+        let previewFile = rootURL.appendingPathComponent(".paperlink-preview.html")
+        do {
+            try html.write(to: previewFile, atomically: true, encoding: .utf8)
+            webView.loadFileURL(previewFile, allowingReadAccessTo: rootURL)
+        } catch {
+            // 写失败 fallback 到 loadHTMLString
+            webView.loadHTMLString(html, baseURL: rootURL)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        var lastKey: String?
     }
 }
 

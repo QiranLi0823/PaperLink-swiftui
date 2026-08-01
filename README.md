@@ -109,7 +109,7 @@ File 菜单下新增 **Settings…**（⌘,），弹出 macOS 玻璃感卡片：
 - **自动闭合 + 智能缩进（Sprint 8.2）**：敲 `{[("` 自动加闭合字符 + 光标居中；回车在 `{}` 之间自动插入对齐换行；普通回车保持当前行行首缩进；通过 `NSTextViewDelegate.textView(_:shouldChangeTextIn:replacementString:)` 拦截
 - **gutter 跳行 + 当前行高亮（Sprint 8.3）**：点击 gutter 行号 → textView 选中整行 + 滚动到可见；监听 `NSTextView.didChangeSelectionNotification` 实时更新当前行高亮（左侧 2pt accent 条 + 6% accent 背景）
 - **⌘F 查找（Sprint 8.4）**：顶部悬浮 FindBar 毛玻璃卡，输入实时匹配 + 系统黄色 `findHighlightColor` 背景高亮；⌘G / ⇧⌘G 跳下一个/上一个 + `showFindIndicator(for:)` 黄色聚焦框；ESC 关闭；通过 NotificationCenter 跨 SwiftUI/NSViewRepresentable 通信
-- **跟随光标（Sprint 9）**：toolbar 第三个按钮（`arrow.left.arrow.right.square`），开启后编辑器选区变化时自动算 anchor（光标行 → `(kind, index, progress)` 三元组），通过 `paperLinkFollowCursorAnchor` 通知推给 `WKWebView`，调用 `window.scrollToBlock(kind, index, progress)` 滚动预览内容到对应 DOM 节点；关闭按钮立即停止同步。详见下节「[跟随光标实现细节](#跟随光标实现细节)」。
+- **跟随光标（Sprint 9）**：toolbar 第三个按钮（`arrow.left.arrow.right.square`），开启后编辑器选区变化时自动算 anchor（光标行 → `(kind, index, progress)` 三元组），通过 `paperLinkFollowCursorAnchor` 通知推给 `WKWebView`，调用 `window.scrollToBlock(kind, index, progress)` 滚动预览内容到对应 DOM 节点；关闭按钮立即停止同步。off → on 时会**主动触发一次刷新**（不等下一次 selectionChanged），让 preview 立即滚到当前光标位置。详见下节「[跟随光标实现细节](#跟随光标实现细节)」。
 - **持久化**：上次打开的文件存为 security-scoped bookmark（`UserDefaults[PaperLink.lastOpenedBookmark]`）；最近文件列表存书签数组（`UserDefaults[PaperLink.recentBookmarks]`）
 - **重命名**：⌘R 触发同目录下重命名（移动文件 + 更新持久化路径）
 - **Finder 双击 / 命令行 `open file.pml`**：通过 `.onOpenURL` 把传入 URL 转给 `document.open(url:)`，实现文件类型关联的端到端打通
@@ -163,6 +163,17 @@ PaperMLLayout 和 HTMLRenderer **各自独立数** paragraph / table / figure �
 - 顶层 `paragraph` block 不能数到 `@title{...}` 内部的内容（L2 / L30 / L36 等）
 - `@table` / `@figure` 的 endLine 必须用 brace-depth 配对，不能用"下一个 top-level header"（否则 L115 paragraph 会被吞进 L103-L117 的 table 块）
 - `@title` / `@author` / `@footnote` 嵌套 brace 让 `blockEndByNextHeader` 仍然适用
+
+### 开关状态门控
+
+跟随光标按钮关闭时 preview **不能**跟随——这条不变量由两道 gate 守护：
+
+- **源头节流**：`LineNumberedEditor.postFollowCursorFraction` 检查 `followCursorMode`，关闭时直接 `return`，不算 anchor / 不 post 通知 / 不触发 editor 自身滚动
+- **Coordinator 守门**：`HTMLPreview.Coordinator.onFollowCursorAnchor` 也检查一次（`defense-in-depth`，防止别处误发通知时 preview 失控）
+
+### off → on 主动刷新
+
+按钮从 off → on 时 `PreviewPaneContent.onChange` post `paperLinkFollowCursorEnabled` 通知，`LineNumberedEditor.Coordinator` 收到后**绕过 50ms debounce** 立即调 `postFollowCursorFraction`，让 preview 瞬间滚到当前光标位置。
 
 ### 可观测性
 

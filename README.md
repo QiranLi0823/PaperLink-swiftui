@@ -126,6 +126,8 @@ File 菜单下 "Settings…"（⌘,）弹出 720×480 macOS 玻璃感卡片：
 
 **主题**：单例 `ThemeManager`，首次启动默认跟随 macOS 系统外观；选 explicit 深/浅色 → 覆盖所有窗口 appearance；选"跟随系统" → 清掉所有 override，窗口实时跟随系统在控制中心切换深/浅。
 
+**弹出位置**：每次 show() 用 `setFrame` 算 PaperLink 主窗口中心，panel 居中到主窗口（不是屏幕中心），并 clamp 到主窗口所在屏幕 visibleFrame 内——多屏 / dock 都不会让 Settings 跳到错位置。
+
 ## 文件类型关联
 
 注册了自定义 UTI `com.paperlink.pml`（conforms to `public.plain-text` / `public.text`）：

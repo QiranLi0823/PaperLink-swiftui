@@ -75,7 +75,7 @@ final class SettingsWindowController: NSWindowController {
         window.contentViewController = NSViewController()
         window.contentViewController?.view = container
         window.contentViewController?.view.wantsLayer = true
-        window.center()
+        // 不在这里 center——放到 show() 里跟随主窗口居中
 
         self.init(window: window)
     }
@@ -84,7 +84,52 @@ final class SettingsWindowController: NSWindowController {
         guard let window = self.window else { return }
         // 跟随当前主题（防止 ThemeManager 在 window 创建后才被切换）
         window.appearance = ThemeManager.shared.theme.nsAppearance
+        // 居中到主窗口（不是屏幕中心——多屏 / dock 都会让屏幕中心偏移）
+        centerOnMainWindow(window)
+        // 把窗口提到最前
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// 把 panel 居中到 PaperLink 主窗口（找不到就 fallback 到屏幕中心）
+    private func centerOnMainWindow(_ panel: NSWindow) {
+        // 找主窗口（ContentView 主窗口，不是 panel 自己）
+        let mainWindow: NSWindow? = {
+            if let main = NSApp.mainWindow, !(main is NSPanel) { return main }
+            let candidates = NSApp.windows.filter {
+                !($0 is NSPanel) && $0.isVisible && $0.frame.width > 100
+            }
+            return candidates.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height })
+        }()
+
+        let targetCenter: NSPoint
+        let targetScreen: NSScreen?
+        if let main = mainWindow {
+            targetCenter = NSPoint(x: main.frame.midX, y: main.frame.midY)
+            targetScreen = main.screen
+        } else {
+            targetScreen = NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first
+            let vf = targetScreen?.visibleFrame ?? NSScreen.main?.frame ?? .zero
+            targetCenter = NSPoint(x: vf.midX, y: vf.midY)
+        }
+
+        // 目标 frame（Cocoa 坐标，左下原点，y 向上）
+        let panelSize = panel.frame.size
+        var newFrame = NSRect(
+            x: targetCenter.x - panelSize.width / 2,
+            y: targetCenter.y - panelSize.height / 2,
+            width: panelSize.width,
+            height: panelSize.height
+        )
+
+        // clamp 到目标屏幕 visibleFrame 内（屏幕变化 / dock 都不至于飞出屏外）
+        if let vf = targetScreen?.visibleFrame {
+            newFrame.origin.x = min(max(newFrame.origin.x, vf.minX),
+                                    vf.maxX - newFrame.width)
+            newFrame.origin.y = min(max(newFrame.origin.y, vf.minY),
+                                    vf.maxY - newFrame.height)
+        }
+
+        panel.setFrame(newFrame, display: true, animate: false)
     }
 }

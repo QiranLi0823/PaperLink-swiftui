@@ -493,9 +493,27 @@ enum PaperMLParser {
         let kv = parseKeyValues(body)
         let keywords = parseStringArray(kv["keywords"] ?? "[]")
         // abstract 内部除 keywords 外的全部文字作为段落
-        let plainText = body
-            .replacingOccurrences(of: "keywords = \(kv["keywords"] ?? "")", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // 剥离时同时支持 `keywords = [...]` 与 `@keywords = [...]` 两种写法
+        // （demo.pml 里字段前缀带 @，但 parseKeyValues 已剥掉 @，所以匹配时不带 @）
+        var plainText = body
+        if kv["keywords"] != nil {
+            // 找包含这一行 keywords 的整行（含可选 @ 前缀），删掉
+            let pattern1 = "@keywords\\s*=\\s*\\[[^\\]]*\\]"
+            let pattern2 = "keywords\\s*=\\s*\\[[^\\]]*\\]"
+            if let regex = try? NSRegularExpression(pattern: pattern1, options: []) {
+                let range = NSRange(location: 0, length: (plainText as NSString).length)
+                plainText = regex.stringByReplacingMatches(
+                    in: plainText, options: [], range: range, withTemplate: ""
+                )
+            }
+            if let regex = try? NSRegularExpression(pattern: pattern2, options: []) {
+                let range = NSRange(location: 0, length: (plainText as NSString).length)
+                plainText = regex.stringByReplacingMatches(
+                    in: plainText, options: [], range: range, withTemplate: ""
+                )
+            }
+        }
+        plainText = plainText.trimmingCharacters(in: .whitespacesAndNewlines)
         let paragraphs = plainText
             .components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

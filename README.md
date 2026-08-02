@@ -10,6 +10,8 @@ macOS SwiftUI 论文编辑器。
 
 Release build 启用 **App Sandbox + hardened runtime**，通过 `scripts/notarize.sh` 可执行 Apple 公证。Dev build 使用空 entitlements 避免 sandbox 干扰开发体验。
 
+File 菜单下新增 **Settings…**（⌘,），弹出 macOS 玻璃感卡片：左侧 sidebar 切换 Preferences / About，Preferences 含主题切换（跟随系统 / 深色 / 浅色），About 含技术栈和开发者邮箱。
+
 ## 布局
 
 - **三栏**：sidebar（条件渲染，可隐藏）+ editor（minWidth 380）+ preview（minWidth 380）
@@ -113,6 +115,17 @@ Release build 启用 **App Sandbox + hardened runtime**，通过 `scripts/notari
 
 File 菜单下 "Open Recent" 子菜单，最近 10 个 `.pml` 文件，存为 security-scoped bookmark（sandbox 跨启动恢复用）。支持 "Clear Menu"。
 
+## Settings（Sprint 8-9）
+
+File 菜单下 "Settings…"（⌘,）弹出 720×480 macOS 玻璃感卡片：
+
+- **窗口材质**：`NSVisualEffectView` material=`.popover` + state=`.active`，真实 vibrancy 玻璃，跟随系统深/浅
+- **左侧 sidebar**：悬浮圆角矩形，顶部 PaperLink brand logo，"Settings" 分组标题，列表项左侧 2pt accent 高亮条 + 选中态 accent 填充
+- **Preferences 面板**：22pt 大标题 + 副标题，主题 segmented 三选一切换器（跟随系统 / 深色 / 浅色）
+- **About 面板**：渐变 app logo 卡片 + 彩色 icon 技术栈列表（SwiftUI / PaperML / WKWebView / Sandbox / UTI）+ 开发者邮箱卡片
+
+**主题**：单例 `ThemeManager`，首次启动默认跟随 macOS 系统外观；选 explicit 深/浅色 → 覆盖所有窗口 appearance；选"跟随系统" → 清掉所有 override，窗口实时跟随系统在控制中心切换深/浅。
+
 ## 文件类型关联
 
 注册了自定义 UTI `com.paperlink.pml`（conforms to `public.plain-text` / `public.text`）：
@@ -176,6 +189,8 @@ PaperLink-swiftui/
         ├── Models/
         │   ├── PaperDocument.swift      # @MainActor + Combine debounce + security-scoped bookmark + 文件 I/O
         │   ├── SidebarState.swift       # sidebar 全局状态（activeMode: Mode? 单一状态）
+        │   ├── ThemeManager.swift       # 全局主题单例（跟随系统 / 深 / 浅），写 NSApp.appearance
+        │   ├── SettingsWindowController.swift  # Settings 玻璃感 NSPanel 单例
         │   └── WindowCloseGuard.swift   # NSWindow.willCloseNotification → "是否保存"对话框
         ├── PaperCore/
         │   ├── PaperMLAST.swift         # AST 节点定义
@@ -185,6 +200,7 @@ PaperLink-swiftui/
         ├── Editor/
         │   ├── EditorSplitViewController.swift  # NSSplitViewController + 比例持久化（NSHostingController 包装 SwiftUI）
         │   ├── LineNumberedEditor.swift # NSTextView 包装 + GutterView 行号 + @identifier 高亮
+        │   ├── SettingsView.swift       # Settings 卡片（3:2 圆角 + sidebar + segmented 主题切换）
         │   └── SidebarView.swift        # sidebar 容器（项目 / 图片）+ ProjectNavigatorView + FiguresGridView
         ├── FileSystem/
         │   ├── ProjectManager.swift     # NSOpenPanel / NSSavePanel + UTF-8 I/O

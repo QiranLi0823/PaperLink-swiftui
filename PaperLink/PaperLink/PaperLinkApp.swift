@@ -11,6 +11,7 @@ import SwiftUI
 struct PaperLinkApp: App {
     @StateObject private var document = PaperDocument()
     @StateObject private var sidebarState = SidebarState.shared
+    @StateObject private var theme = ThemeManager.shared
     @State private var closeGuard: WindowCloseGuard?
     @State private var recentFiles: [(url: URL, path: String)] = []
 
@@ -19,6 +20,7 @@ struct PaperLinkApp: App {
             ContentView()
                 .environmentObject(document)
                 .environmentObject(sidebarState)
+                .environmentObject(theme)
                 .focusedSceneValue(\.sidebarState, sidebarState)
                 .toolbar {
                     // sidebar 模式按钮：原生 Picker + segmented 样式（macOS 26 Liquid Glass）
@@ -44,7 +46,7 @@ struct PaperLinkApp: App {
         }
         .windowToolbarStyle(.unified)
         .commands {
-            // File 菜单：替换默认的 New Item，加 Open / Save / Save As / Rename / Open Recent
+            // File 菜单：替换默认的 New Item，加 Open / Save / Save As / Rename / Open Recent / Settings
             CommandGroup(replacing: .newItem) {
                 Button("Open…") { openAction() }
                     .keyboardShortcut("o", modifiers: [.command])
@@ -58,6 +60,11 @@ struct PaperLinkApp: App {
                     .keyboardShortcut("r", modifiers: [.command])
                 Divider()
                 openRecentMenu
+                Divider()
+                Button("Settings…") {
+                    SettingsWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: [.command])
             }
         }
     }

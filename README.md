@@ -92,7 +92,7 @@ File 菜单下新增 **Settings…**（⌘,），弹出 macOS 玻璃感卡片：
 - **错误行高亮**：`parseWithErrors` 报告的 ParseError 行号在 gutter 内画红色 10% 背景 + 左侧 2pt 红条，行号变红
 - **行号定位**：按 visual line 渲染——一段被软换行拆成 N 行的文字，行号只画在第一行顶部，后续视觉行只画错误底色（不重复行号）
 - **多色语法高亮（Sprint 8.1 + 9.18）**：四种 token 各自颜色——`@identifier` accentColor 蓝、`"..."` 字符串 systemGreen 绿、`\d+` 数字 systemOrange 橙、`%` 行注释 + `%%...%%` 块注释 secondaryLabelColor 灰；`@identifier` 涂色跳过字符串/注释内部范围避免误涂
-- **自动闭合 + 智能缩进（Sprint 8.2）**：敲 `{[("` 自动加闭合字符 + 光标居中；回车在 `{}` 之间自动插入对齐换行；普通回车保持当前行行首缩进；通过 `NSTextViewDelegate.textView(_:shouldChangeTextIn:replacementString:)` 拦截
+- **自动闭合 + 智能缩进（Sprint 8.2 + 9.19）**：敲 `{[("` 自动加闭合字符 + 光标居中；回车在 `{}` 之间自动插入对齐换行；普通回车保持当前行行首缩进；**行首敲第二个 `%` 自动展开块注释骨架 `%%\n\t\n%%`、光标停在 tab 缩进的中行**；通过 `NSTextViewDelegate.textView(_:shouldChangeTextIn:replacementString:)` 拦截
 - **gutter 跳行 + 当前行高亮（Sprint 8.3）**：点击 gutter 行号 → textView 选中整行 + 滚动到可见；监听 `NSTextView.didChangeSelectionNotification` 实时更新当前行高亮（左侧 2pt accent 条 + 6% accent 背景）
 - **⌘F 查找（Sprint 8.4）**：顶部悬浮 FindBar 毛玻璃卡，输入实时匹配 + 系统黄色 `findHighlightColor` 背景高亮；⌘G / ⇧⌘G 跳下一个/上一个 + `showFindIndicator(for:)` 黄色聚焦框；ESC 关闭；通过 NotificationCenter 跨 SwiftUI/NSViewRepresentable 通信
 - **跟随光标（Sprint 9）**：toolbar 第三个按钮（`arrow.left.arrow.right.square`），开启后编辑器选区变化时自动算 anchor（光标行 → `(kind, index, progress)` 三元组），通过 `paperLinkFollowCursorAnchor` 通知推给 `WKWebView`，调用 `window.scrollToBlock(kind, index, progress)` 滚动预览内容到对应 DOM 节点；关闭按钮立即停止同步。off → on 时会**主动触发一次刷新**（不等下一次 selectionChanged），让 preview 立即滚到当前光标位置。详见下节「[跟随光标实现细节](#跟随光标实现细节)」。
@@ -160,6 +160,14 @@ PaperMLLayout 和 HTMLRenderer **各自独立数** paragraph / table / figure �
 ### off → on 主动刷新
 
 按钮从 off → on 时 `PreviewPaneContent.onChange` post `paperLinkFollowCursorEnabled` 通知，`LineNumberedEditor.Coordinator` 收到后**绕过 50ms debounce** 立即调 `postFollowCursorFraction`，让 preview 瞬间滚到当前光标位置。
+
+### 编辑器未交互时禁滚（Sprint 9.20）
+
+应用启动后 / 切到新文档后，编辑器还**没被用户点击过**（selectedRange = 0），此时开启 follow-cursor 不会让 preview 滚动——避免 preview 跳到文档开头破坏用户视觉锚点。`Coordinator.userHasInteracted` 标志：
+
+- `textDidBeginEditing`（用户敲字）或 `selectionChanged`（点击 / 选区变化）任一首次触发置 true
+- `updateNSView` 检测到 document 变化（打开 / 重载文件）置回 false
+- `postFollowCursorFraction` 在标志为 false 时直接 return，不发 `paperLinkFollowCursorAnchor` 通知
 
 ### 可观测性
 

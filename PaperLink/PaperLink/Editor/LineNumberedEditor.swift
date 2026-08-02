@@ -145,6 +145,9 @@ struct LineNumberedEditor: NSViewRepresentable {
             // 外部 source 变化 → 整体替换 + 重涂语法高亮
             textView.string = text
             applySyntaxHighlighting(to: textView)
+            // Sprint 9.20：新文档/重载后编辑器"未交互"状态重置，
+            // follow-cursor 不会因为旧的 selectedRange 误把 preview 滚到错位置
+            context.coordinator.userHasInteracted = false
         }
 
         gutter.errorLines = Set(errors.map { $0.line })
@@ -191,9 +194,12 @@ struct LineNumberedEditor: NSViewRepresentable {
         private var matchRanges: [NSRange] = []
         private var currentMatchIndex: Int = 0
         private var lastQuery: String = ""
-        // Sprint 8 编译错修复：把 coordinator 标 main-actor，
-        // 让 selectionChanged / recomputeMatchesAndHighlight 等闭包能合法访问 main-actor 隔离的方法
-        // （如 document.open(url:) / NotificationCenter.post 等）
+        // Sprint 9.20：编辑器是否曾被用户交互过（点击 / 输入 / 选区变化）。
+        // 未交互时 selectedRange 是默认 0（文档开头），按这个算 anchor 会让
+        // follow-cursor 主动刷新时把 preview 滚到顶部——用户期望不开。
+        // 由 textDidBeginEditing / textViewDidChangeSelection 任一首次触发置 true。
+        // updateNSView 也会在 document 变化时重置回 false。
+        var userHasInteracted = false
 
         init(text: Binding<String>) {
             self._text = text
@@ -204,6 +210,12 @@ struct LineNumberedEditor: NSViewRepresentable {
             text = tv.string
             refreshGutter()
             recomputeMatchesAndHighlight()
+        }
+
+        /// Sprint 9.20：用户首次编辑时翻转 userHasInteracted（兜底：selectionChanged 已能覆盖点击/选中场景，
+        /// textDidBeginEditing 覆盖"用户只敲字不移动选区"的场景）
+        func textDidBeginEditing(_ notification: Notification) {
+            userHasInteracted = true
         }
 
         /// Sprint 8.4：根据当前 searchQuery 重新计算所有匹配 + 涂背景 + 上报 count
@@ -268,8 +280,47 @@ struct LineNumberedEditor: NSViewRepresentable {
         /// - `"` → 自动加 `"`，光标居中；再敲 `"` 时跳过
         /// - 回车：当前行尾是 `{` 且下一字符是 `}` → 自动插入一对换行 + 缩进，光标移到中间（多一对缩进）
         /// - 普通回车：保持当前行的行首缩进
+        /// - `%%` 块注释骨架（Sprint 9.19）：行首敲第二个 `%` 时自动展开成
+        ///   ```
+        ///   %%
+        ///   \t
+        ///   %%
+        ///   ```
+        ///   光标落在中间的 tab 缩进行
         func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
             guard let str = replacementString, !str.isEmpty else { return true }
+
+            // Sprint 9.19 %% 块注释骨架：第二个 % 进入时触发
+            // 条件：1) 输入是单个 %；2) 光标前一个字符是 %；3) 前一个 % 之前只有空白（行首）
+            if str == "%", affectedCharRange.location >= 1 {
+                let nsText = textView.string as NSString
+                let prevIdx = affectedCharRange.location - 1
+                let prevCh = Character(UnicodeScalar(nsText.character(at: prevIdx))!)
+                if prevCh == "%" {
+                    // 往前扫描，确认前一个 % 在行首（前面只有空白）
+                    var j = prevIdx - 1
+                    var atLineStart = true
+                    while j >= 0 {
+                        let c = Character(UnicodeScalar(nsText.character(at: j))!)
+                        if c.isNewline { break }
+                        if c != " " && c != "\t" { atLineStart = false; break }
+                        j -= 1
+                    }
+                    if atLineStart {
+                        // 展开：前一个 % 已在 loc-1，只需补齐 loc 之后的内容
+                        // 插入字符：%\n\t\n%%  →  最终 loc-1..loc+5:  % % \n \t \n % %
+                        //                                            ↑光标在 loc+3（\t 之后）
+                        let insert = "%\n\t\n%%"
+                        if textView.shouldChangeText(in: affectedCharRange, replacementString: insert) {
+                            textView.replaceCharacters(in: affectedCharRange, with: insert)
+                            textView.didChangeText()
+                            let cursorLoc = affectedCharRange.location + 3
+                            textView.setSelectedRange(NSRange(location: cursorLoc, length: 0))
+                        }
+                        return false
+                    }
+                }
+            }
 
             // 单字符插入
             if str.count == 1 {
@@ -331,19 +382,24 @@ struct LineNumberedEditor: NSViewRepresentable {
                         return false
                     }
 
-                    // 普通回车：保持行首缩进
+                    // 普通回车：保持当前行的行首缩进
+                    // Sprint 9.19：行首有缩进 → 用 leadingWS（光标紧贴 tab 后也能继承，如块注释骨架中行）
+                    // 行首无缩进但光标前有空白 → 回退到 trailingWS（保留旧行为）
                     let lineRange = nsText.lineRange(for: NSRange(location: affectedCharRange.location, length: 0))
                     let linePrefix = nsText.substring(with: NSRange(
                         location: lineRange.location,
                         length: max(0, affectedCharRange.location - lineRange.location)
                     ))
-                    let trailingWS = String(linePrefix.reversed().prefix(while: { $0 == " " || $0 == "\t" }).reversed())
-                    if !trailingWS.isEmpty {
-                        let combined = "\n" + trailingWS
+                    let leadingWS = String(linePrefix.prefix(while: { $0 == " " || $0 == "\t" }))
+                    let indent = leadingWS.isEmpty
+                        ? String(linePrefix.reversed().prefix(while: { $0 == " " || $0 == "\t" }).reversed())
+                        : leadingWS
+                    if !indent.isEmpty {
+                        let combined = "\n" + indent
                         if textView.shouldChangeText(in: affectedCharRange, replacementString: combined) {
                             textView.replaceCharacters(in: affectedCharRange, with: combined)
                             textView.didChangeText()
-                            textView.setSelectedRange(NSRange(location: affectedCharRange.location + 1 + trailingWS.count, length: 0))
+                            textView.setSelectedRange(NSRange(location: affectedCharRange.location + 1 + indent.count, length: 0))
                         }
                         return false
                     }
@@ -371,6 +427,8 @@ struct LineNumberedEditor: NSViewRepresentable {
         private var fractionDebounce: Timer?
         @objc func selectionChanged() {
             guard let tv = textView, let g = gutter else { return }
+            // Sprint 9.20：选区变化 = 用户已与编辑器交互
+            userHasInteracted = true
             let nsText = tv.string as NSString
             let cursor = tv.selectedRange.location
             var line = 1
@@ -413,6 +471,10 @@ struct LineNumberedEditor: NSViewRepresentable {
             // Sprint 9.15：跟随光标按钮关闭时不发通知。deeper 的 Coordinator 也会
             // 再守一道，但源头先节流最干净。
             guard MainActor.assumeIsolated({ SidebarState.shared.followCursorMode }) else { return }
+            // Sprint 9.20：编辑器从未被用户交互过时，selectedRange = 0（默认），
+            // 此时算出的 anchor 是文档开头，开关按钮触发的主动刷新或 selectionChanged
+            // 都不应让 preview 滚——等用户真点击 / 输入编辑器后再启动随动。
+            guard userHasInteracted else { return }
             // Sprint 9.7：editor → preview 通过 (kind, index, progress) 锚点对齐，
             // preview 端用真实 DOM getBoundingClientRect() 拿高度（避免预估不准）。
             let nsText = tv.string as NSString

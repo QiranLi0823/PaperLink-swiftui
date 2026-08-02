@@ -166,4 +166,9 @@ struct SidebarModeBar: View {
 extension Notification.Name {
     static let paperLinkStartRename = Notification.Name("PaperLink.startRename")
     static let paperLinkOpenFile = Notification.Name("PaperLink.openFile")
+    // Sprint 8.4 ⌘F 查找
+    static let paperLinkFindQueryChanged = Notification.Name("PaperLink.findQueryChanged")
+    static let paperLinkFindGotoMatch    = Notification.Name("PaperLink.findGotoMatch")
+    static let paperLinkFindMatchCount   = Notification.Name("PaperLink.findMatchCount")
+    static let paperLinkFindCurrentIndex = Notification.Name("PaperLink.findCurrentIndex")
 }

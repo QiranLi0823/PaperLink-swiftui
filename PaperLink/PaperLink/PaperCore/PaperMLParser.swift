@@ -306,7 +306,7 @@ enum PaperMLParser {
         guard i < source.endIndex, source[i] == "{" else { return nil }
 
         var depth = 0
-        var start = i
+        let start = i
         while i < source.endIndex {
             let ch = source[i]
             if ch == "{" { depth += 1 }

@@ -15,13 +15,17 @@ struct ContentView: View {
     @State private var renameText = ""
     @StateObject private var treeManager = ProjectTreeManager()
 
+    // Sprint 8.4：⌘F 查找条
+    @State private var showFindBar: Bool = false
+    @State private var searchQuery: String = ""
+    @State private var matchCount: Int = 0
+    @State private var currentMatchIndex: Int = 0
+
     var body: some View {
         VStack(spacing: 0) {
-            // 紧凑 toolbar：只在重命名时出现
             compactToolbar
 
             HStack(spacing: 0) {
-                // 左侧 sidebar（activeMode 非 nil 时显示）
                 if sidebarState.isVisible {
                     SidebarView(
                         treeManager: treeManager,
@@ -32,12 +36,36 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .leading)))
                 }
 
-                // 右侧：editor + preview 1:1（可拖动 + 持久化比例）
                 SplitContainer(document: document)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(.easeInOut(duration: 0.22), value: sidebarState.activeMode)
+            // Sprint 8.4 FindBar 浮层
+            .overlay(alignment: .topTrailing) {
+                if showFindBar {
+                    FindBar(
+                        query: $searchQuery,
+                        matchCount: $matchCount,
+                        currentIndex: $currentMatchIndex,
+                        onPrev: {
+                            NotificationCenter.default.post(name: .paperLinkFindGotoMatch, object: nil, userInfo: ["next": false])
+                        },
+                        onNext: {
+                            NotificationCenter.default.post(name: .paperLinkFindGotoMatch, object: nil, userInfo: ["next": true])
+                        },
+                        onClose: {
+                            showFindBar = false
+                            searchQuery = ""
+                            NotificationCenter.default.post(name: .paperLinkFindQueryChanged, object: nil, userInfo: ["query": ""])
+                        }
+                    )
+                    .padding(.top, 8)
+                    .padding(.trailing, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: showFindBar)
 
             StatusBar(errors: document.errors)
         }
@@ -52,6 +80,25 @@ struct ContentView: View {
         }
         .onAppear {
             treeManager.reload(from: document.fileURL)
+        }
+        // ⌘F 打开查找条
+        .background(
+            Button("") { showFindBar = true }
+                .keyboardShortcut("f", modifiers: [.command])
+                .opacity(0)
+                .frame(width: 0, height: 0)
+        )
+        // 监听 searchQuery 变化 → post 给 editor
+        .onChange(of: searchQuery) { _, newQuery in
+            NotificationCenter.default.post(name: .paperLinkFindQueryChanged, object: nil, userInfo: ["query": newQuery])
+        }
+        // 监听 editor 回报 matchCount / currentIndex
+        .onReceive(NotificationCenter.default.publisher(for: .paperLinkFindMatchCount)) { note in
+            matchCount = (note.userInfo?["count"] as? Int) ?? 0
+            currentMatchIndex = 0
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .paperLinkFindCurrentIndex)) { note in
+            currentMatchIndex = (note.userInfo?["index"] as? Int) ?? 0
         }
     }
 
